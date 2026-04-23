@@ -73,6 +73,8 @@ function app() {
             this.loadPlans();
             this.running = false;
             this.activePlan = null;
+          } else if (l.includes('[DISCONNECTED]')) {
+            this.connected = false;
           }
         }
         this.$nextTick(() => {
@@ -227,6 +229,10 @@ function app() {
     async stopPlan() {
       if (!this.running) return;
       await fetch('/api/robot/stop', { method: 'POST' });
+    },
+
+    async disconnect() {
+      await fetch('/api/robot/disconnect', { method: 'POST' });
     },
   };
 }

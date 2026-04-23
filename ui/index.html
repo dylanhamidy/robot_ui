@@ -100,6 +100,10 @@
               :class="connected ? 'bg-green-500' : 'bg-red-500'"></span>
         <span x-text="connected ? 'Connected' : 'Disconnected'"></span>
       </div>
+      <button x-show="connected" @click="disconnect()"
+              class="focus-ring px-3 py-1.5 text-xs font-medium bg-red-50 hover:bg-red-100 text-red-600 rounded-md border border-red-200 transition-colors duration-150">
+        Disconnect
+      </button>
       <button @click="showSetup = true"
               class="focus-ring px-3 py-1.5 text-xs font-medium bg-btn hover:bg-btn rounded-md border border-chrome-input transition-colors duration-150">
         Setup

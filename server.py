@@ -23,6 +23,7 @@ app = FastAPI()
 # ── state ──────────────────────────────────────────────────────────────────
 _active_proc: Optional[subprocess.Popen] = None
 _active_plan: Optional[str] = None
+_rviz_proc: Optional[subprocess.Popen] = None
 _connected: bool = False
 _ws_clients: list[WebSocket] = []
 
@@ -153,7 +154,7 @@ class ConnectBody(BaseModel):
 
 @app.post("/api/robot/connect")
 async def robot_connect(body: ConnectBody):
-    global _connected
+    global _connected, _rviz_proc
     pw = body.sudo_password
     iface = body.interface
 
@@ -178,13 +179,14 @@ async def robot_connect(body: ConnectBody):
         await run_step("ping -c 4 192.168.0.20", "Pinging robot at 192.168.0.20")
         # Step 3 runs in background - launch RViz
         await _broadcast("\n[STEP] Launching RViz in real mode...\n")
-        subprocess.Popen(
+        _rviz_proc = subprocess.Popen(
             "source /opt/ros/humble/setup.bash && "
             "source ~/ros2_ws/install/setup.bash && "
             "ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py "
             "mode:=real host:=192.168.0.20 port:=12345 model:=a0912",
             shell=True, executable="/bin/bash",
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            preexec_fn=os.setsid
         )
         await _broadcast("[INFO] RViz launching in background\n")
         _connected = True
@@ -218,7 +220,7 @@ async def _watch_proc(proc: subprocess.Popen, plan_name: str):
     loop = asyncio.get_event_loop()
     await _stream_proc(proc)
     rc = await loop.run_in_executor(None, proc.wait)
-    result = "success" if rc == 0 else "unknown" if rc == -signal.SIGTERM else "fail"
+    result = "success" if rc == 0 else "unknown" if rc < 0 else "fail"
     _record_stat(plan_name, result)
     await _broadcast(f"[DONE] Plan '{plan_name}' finished — {result}\n")
     _active_proc = None
@@ -229,7 +231,20 @@ async def robot_stop():
     global _active_proc, _active_plan
     if not _active_proc or _active_proc.poll() is not None:
         raise HTTPException(409, "No plan running")
-    _active_proc.send_signal(signal.SIGTERM)
+    _active_proc.send_signal(signal.SIGINT)
+    return {"ok": True}
+
+@app.post("/api/robot/disconnect")
+async def robot_disconnect():
+    global _rviz_proc, _connected
+    if _rviz_proc and _rviz_proc.poll() is None:
+        try:
+            os.killpg(os.getpgid(_rviz_proc.pid), signal.SIGINT)
+        except ProcessLookupError:
+            pass
+    _rviz_proc = None
+    _connected = False
+    await _broadcast("[DISCONNECTED]\n")
     return {"ok": True}
 
 @app.get("/api/robot/status")
