@@ -36,6 +36,18 @@ def _plan_path(name: str) -> Path:
 def _stats_path(name: str) -> Path:
     return STATS_DIR / f"{name}.json"
 
+def _coerce_step_floats(step: dict) -> dict:
+    """Ensure all numeric fields in a step are stored as Python floats."""
+    if "pos" in step:
+        step["pos"] = [float(v) for v in step["pos"]]
+    for key in ("vel", "acc"):
+        if key in step:
+            v = step[key]
+            step[key] = [float(x) for x in v] if isinstance(v, list) else float(v)
+    if "time" in step:
+        step["time"] = float(step["time"])
+    return step
+
 def _load_stats(name: str) -> dict:
     p = _stats_path(name)
     if p.exists():
@@ -97,7 +109,8 @@ async def create_plan(body: PlanBody):
     p = _plan_path(body.name)
     if p.exists():
         raise HTTPException(400, "Plan already exists")
-    data = {"name": body.name, "created_at": datetime.now().isoformat(timespec="seconds"), "steps": body.steps}
+    steps = [_coerce_step_floats(s) for s in body.steps]
+    data = {"name": body.name, "created_at": datetime.now().isoformat(timespec="seconds"), "steps": steps}
     p.write_text(json.dumps(data, indent=2))
     return data
 
@@ -112,6 +125,7 @@ async def import_plan(file: UploadFile):
     p = _plan_path(data["name"])
     if "created_at" not in data:
         data["created_at"] = datetime.now().isoformat(timespec="seconds")
+    data["steps"] = [_coerce_step_floats(s) for s in data["steps"]]
     p.write_text(json.dumps(data, indent=2))
     return data
 
@@ -131,7 +145,7 @@ async def update_plan(name: str, body: UpdateBody):
     if not p.exists():
         raise HTTPException(404, "Not found")
     data = json.loads(p.read_text())
-    data["steps"] = body.steps
+    data["steps"] = [_coerce_step_floats(s) for s in body.steps]
     p.write_text(json.dumps(data, indent=2))
     return data
 

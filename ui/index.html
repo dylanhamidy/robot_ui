@@ -202,7 +202,7 @@
                 <tr class="text-dim text-[10px] font-semibold uppercase tracking-wider border-b border-chrome">
                   <th class="pb-2.5 text-left w-8 font-semibold">#</th>
                   <th class="pb-2.5 text-left w-20 font-semibold">Type</th>
-                  <th class="pb-2.5 text-left font-semibold">Position</th>
+                  <th class="pb-2.5 text-left font-semibold">Position <span class="normal-case tracking-normal font-normal text-dim">(MoveL: J1–J6 deg · MoveJ: X/Y/Z mm, A/B/C deg)</span></th>
                   <th class="pb-2.5 text-left w-16 font-semibold">Vel</th>
                   <th class="pb-2.5 text-left w-16 font-semibold">Acc</th>
                   <th class="pb-2.5 text-left w-16 font-semibold">Time</th>
@@ -220,10 +220,10 @@
                     <td class="py-2.5 font-mono text-xs text-gray-700"
                         x-text="step.pos.map(v => parseFloat(v).toFixed(1)).join(', ')"></td>
                     <td class="py-2.5 text-xs text-dim font-mono"
-                        x-text="Array.isArray(step.vel) ? step.vel[0] : (step.vel ?? '—')"></td>
+                        x-text="step.vel != null ? parseFloat(Array.isArray(step.vel) ? step.vel[0] : step.vel).toFixed(1) : '—'"></td>
                     <td class="py-2.5 text-xs text-dim font-mono"
-                        x-text="Array.isArray(step.acc) ? step.acc[0] : (step.acc ?? '—')"></td>
-                    <td class="py-2.5 text-xs text-dim font-mono" x-text="step.time ?? '—'"></td>
+                        x-text="step.acc != null ? parseFloat(Array.isArray(step.acc) ? step.acc[0] : step.acc).toFixed(1) : '—'"></td>
+                    <td class="py-2.5 text-xs text-dim font-mono" x-text="step.time != null ? parseFloat(step.time).toFixed(1) : '—'"></td>
                   </tr>
                 </template>
               </tbody>
@@ -408,15 +408,25 @@
                     Remove
                   </button>
                 </div>
-                <div class="grid grid-cols-6 gap-1 mb-2">
+                <div class="grid grid-cols-6 gap-1 mb-1">
                   <template x-for="(_, j) in [0,1,2,3,4,5]" :key="j">
                     <input type="number" step="any"
-                           :placeholder="['X','Y','Z','Rx','Ry','Rz'][j]"
-                           :aria-label="['X','Y','Z','Rx','Ry','Rz'][j] + ', step ' + (i + 1)"
+                           :placeholder="step.type === 'MoveL'
+                             ? ['J1','J2','J3','J4','J5','J6'][j]
+                             : ['X','Y','Z','A','B','C'][j]"
+                           :aria-label="step.type === 'MoveL'
+                             ? (['J1','J2','J3','J4','J5','J6'][j] + '°, step ' + (i + 1))
+                             : (j < 3
+                                 ? (['X','Y','Z'][j] + ' mm, step ' + (i + 1))
+                                 : (['A','B','C'][j - 3] + '°, step ' + (i + 1)))"
                            x-model.number="step.pos[j]"
                            class="focus-ring bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 w-full transition-colors duration-150" />
                   </template>
                 </div>
+                <div class="text-[10px] text-dim mb-2"
+                     x-text="step.type === 'MoveL'
+                       ? 'J1 – J6 (all degrees)'
+                       : 'X, Y, Z (mm) · A, B, C (degrees)'"></div>
                 <div class="grid grid-cols-3 gap-2">
                   <div>
                     <label :for="'step-vel-' + i" class="block text-[11px] text-gray-500 mb-1">Vel</label>
