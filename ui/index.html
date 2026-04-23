@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Luxolis Robot Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Figtree', 'system-ui', 'sans-serif'] }
+        }
+      }
+    }
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/focus@3.x.x/dist/cdn.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    :root {
+      --surface-base:        #ffffff;   /* main page background */
+      --surface-raised:      #ffffff;   /* panels — shadow-differentiated, not color-differentiated */
+      --surface-input:       #f9fafb;   /* input fields — barely-grey to distinguish from white panel */
+      --surface-deep:        #0f0f0f;   /* terminal — stays dark on light UI */
+      --border:              #e5e7eb;   /* gray-200 — structural dividers */
+      --border-input:        #d1d5db;   /* gray-300 — input and button borders */
+      --text-muted:          #6b7280;   /* gray-500 — labels, metadata */
+      --btn-secondary:       #f3f4f6;   /* gray-100 — secondary button bg */
+      --btn-secondary-hover: #e5e7eb;   /* gray-200 — secondary button hover */
+      --btn-primary:         #111827;   /* near-black — primary actions */
+      --btn-primary-hover:   #374151;   /* gray-700 — primary hover */
+    }
+
+    /* Token utilities — Tailwind doesn't know about these */
+    .bg-surface-base            { background-color: var(--surface-base); }
+    .bg-surface-raised          { background-color: var(--surface-raised); }
+    .bg-surface-input           { background-color: var(--surface-input); }
+    .bg-surface-deep            { background-color: var(--surface-deep); }
+    .border-chrome              { border-color: var(--border); }
+    .border-chrome-input        { border-color: var(--border-input); }
+    .text-dim                   { color: var(--text-muted); }
+    .bg-btn                     { background-color: var(--btn-secondary); }
+    .hover\:bg-btn:hover        { background-color: var(--btn-secondary-hover); }
+    .bg-accent-ui               { background-color: var(--btn-primary); }
+    .hover\:bg-accent-ui:hover  { background-color: var(--btn-primary-hover); }
+
+    /* Notion-style elevation — shadow instead of strong border */
+    .shadow-sidebar { box-shadow: 2px 0 8px rgba(0,0,0,0.06); }
+    .shadow-header  { box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+    .shadow-footer  { box-shadow: 0 -1px 4px rgba(0,0,0,0.05); }
+    .shadow-modal   { box-shadow: 0 8px 30px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06); }
+
+    [x-cloak] { display: none !important; }
+
+    .spinner { animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .terminal {
+      font-family: 'Courier New', monospace;
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.6;
+    }
+
+    /* Focus ring */
+    .focus-ring:focus-visible {
+      outline: 2px solid rgba(37, 99, 235, 0.6);
+      outline-offset: 2px;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border-input); border-radius: 2px; }
+    ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+  </style>
+</head>
+<body class="bg-surface-base text-gray-900 h-screen flex flex-col" x-data="app()" x-init="init()">
+
+  <!-- Header -->
+  <header class="flex items-center justify-between px-5 py-3 bg-surface-raised shadow-header flex-shrink-0 relative z-10">
+    <div class="flex items-center gap-2.5">
+      <div class="w-7 h-7 bg-accent-ui rounded-lg flex items-center justify-center flex-shrink-0" aria-hidden="true">
+        <svg class="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z" />
+        </svg>
+      </div>
+      <span class="text-[15px] font-semibold tracking-tight text-gray-900">Luxolis Robot Control</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium select-none"
+           :class="connected
+             ? 'bg-green-50 text-green-700 ring-1 ring-green-200'
+             : 'bg-red-50 text-red-600 ring-1 ring-red-200'">
+        <span aria-hidden="true"
+              class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+              :class="connected ? 'bg-green-500' : 'bg-red-500'"></span>
+        <span x-text="connected ? 'Connected' : 'Disconnected'"></span>
+      </div>
+      <button @click="showSetup = true"
+              class="focus-ring px-3 py-1.5 text-xs font-medium bg-btn hover:bg-btn rounded-md border border-chrome-input transition-colors duration-150">
+        Setup
+      </button>
+    </div>
+  </header>
+
+  <!-- Main content -->
+  <div class="flex flex-1 overflow-hidden">
+
+    <!-- Left: Plan list -->
+    <aside class="w-64 flex flex-col bg-surface-raised shadow-sidebar flex-shrink-0 relative z-10">
+      <div class="px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-dim border-b border-chrome">
+        Path Plans
+      </div>
+      <div class="flex-1 overflow-y-auto p-2 space-y-1">
+        <template x-for="plan in plans" :key="plan.name">
+          <div @click="selectPlan(plan)"
+               @keydown.enter="selectPlan(plan)"
+               @keydown.space.prevent="selectPlan(plan)"
+               role="button"
+               tabindex="0"
+               :aria-pressed="selected && selected.name === plan.name"
+               :aria-label="plan.name + ', ' + plan.steps.length + ' steps'"
+               class="focus-ring cursor-pointer rounded-lg p-3 border transition-all duration-150"
+               :class="selected && selected.name === plan.name
+                 ? 'border-blue-200 bg-blue-50'
+                 : 'border-chrome hover:border-gray-300 hover:bg-gray-50'">
+            <div class="font-semibold text-sm leading-tight text-gray-900" x-text="plan.name"></div>
+            <div class="text-xs text-dim mt-0.5" x-text="plan.steps.length + ' step' + (plan.steps.length !== 1 ? 's' : '')"></div>
+            <div class="flex items-center gap-2.5 mt-1.5 text-[11px]">
+              <span class="text-dim"><span x-text="plan.stats.total_runs"></span> runs</span>
+              <span class="text-green-600">
+                <span aria-hidden="true">✓ </span><span x-text="plan.stats.success"></span>
+              </span>
+              <span class="text-red-500">
+                <span aria-hidden="true">✗ </span><span x-text="plan.stats.fail"></span>
+              </span>
+              <span class="text-amber-500">
+                <span aria-hidden="true">? </span><span x-text="plan.stats.unknown"></span>
+              </span>
+            </div>
+          </div>
+        </template>
+      </div>
+      <div class="p-2 border-t border-chrome space-y-1.5">
+        <button @click="openAddPlan()"
+                class="focus-ring w-full py-2 text-xs font-semibold text-white bg-accent-ui hover:bg-accent-ui rounded-md transition-colors duration-150">
+          + Add Plan
+        </button>
+        <label class="focus-ring block w-full py-2 text-xs font-medium text-gray-700 text-center bg-btn hover:bg-btn rounded-md border border-chrome-input cursor-pointer transition-colors duration-150">
+          Import JSON
+          <input type="file" accept=".json" class="hidden" @change="importPlan($event)" />
+        </label>
+      </div>
+    </aside>
+
+    <!-- Right: Plan detail -->
+    <main class="flex-1 flex flex-col overflow-hidden min-w-0">
+      <template x-if="!selected">
+        <div class="flex-1 flex flex-col items-center justify-center gap-3 text-center px-8">
+          <div class="w-12 h-12 rounded-2xl bg-gray-100 border border-chrome flex items-center justify-center mb-1" aria-hidden="true">
+            <svg class="w-6 h-6 text-dim" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 010 3.75H5.625a1.875 1.875 0 010-3.75z" />
+            </svg>
+          </div>
+          <div>
+            <p class="text-sm font-medium text-gray-700">No plan selected</p>
+            <p class="text-xs text-dim mt-1 max-w-[220px]">Pick a plan from the sidebar or use <span class="font-medium text-gray-500">+ Add Plan</span> to create one.</p>
+          </div>
+        </div>
+      </template>
+      <template x-if="selected">
+        <div class="flex-1 flex flex-col overflow-hidden">
+          <!-- Plan detail header -->
+          <div class="px-5 py-3 border-b border-chrome flex items-center justify-between flex-shrink-0">
+            <div>
+              <div class="text-[10px] font-semibold uppercase tracking-widest text-dim leading-none mb-0.5">Path Plan</div>
+              <div class="text-sm font-semibold text-gray-900" x-text="selected.name"></div>
+            </div>
+            <div class="flex gap-2">
+              <button @click="openEditPlan()"
+                      class="focus-ring px-3 py-1.5 text-xs font-medium bg-btn hover:bg-btn text-gray-700 rounded-md border border-chrome-input transition-colors duration-150">
+                Edit
+              </button>
+              <button @click="confirmDelete()"
+                      class="focus-ring px-3 py-1.5 text-xs font-medium bg-red-50 hover:bg-red-100 text-red-600 rounded-md border border-red-200 transition-colors duration-150">
+                Delete
+              </button>
+            </div>
+          </div>
+          <!-- Steps table -->
+          <div class="flex-1 overflow-auto p-4">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-dim text-[10px] font-semibold uppercase tracking-wider border-b border-chrome">
+                  <th class="pb-2.5 text-left w-8 font-semibold">#</th>
+                  <th class="pb-2.5 text-left w-20 font-semibold">Type</th>
+                  <th class="pb-2.5 text-left font-semibold">Position</th>
+                  <th class="pb-2.5 text-left w-16 font-semibold">Vel</th>
+                  <th class="pb-2.5 text-left w-16 font-semibold">Acc</th>
+                  <th class="pb-2.5 text-left w-16 font-semibold">Time</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(step, i) in selected.steps" :key="i">
+                  <tr class="border-b border-chrome hover:bg-gray-50 transition-colors duration-100 last:border-0">
+                    <td class="py-2.5 text-gray-400 text-xs font-mono" x-text="i + 1"></td>
+                    <td class="py-2.5">
+                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium"
+                            :class="step.type === 'MoveJ' ? 'bg-blue-50 text-blue-700' : 'bg-violet-50 text-violet-700'"
+                            x-text="step.type"></span>
+                    </td>
+                    <td class="py-2.5 font-mono text-xs text-gray-700"
+                        x-text="step.pos.map(v => parseFloat(v).toFixed(1)).join(', ')"></td>
+                    <td class="py-2.5 text-xs text-dim font-mono"
+                        x-text="Array.isArray(step.vel) ? step.vel[0] : (step.vel ?? '—')"></td>
+                    <td class="py-2.5 text-xs text-dim font-mono"
+                        x-text="Array.isArray(step.acc) ? step.acc[0] : (step.acc ?? '—')"></td>
+                    <td class="py-2.5 text-xs text-dim font-mono" x-text="step.time ?? '—'"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
+    </main>
+  </div>
+
+  <!-- Footer: Start/Stop -->
+  <footer class="px-5 py-3 bg-surface-raised shadow-footer flex items-center gap-3 flex-shrink-0 relative z-10">
+    <button @click="startPlan()"
+            :disabled="!selected || running"
+            class="focus-ring flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-md transition-all duration-150"
+            :class="!selected || running
+              ? 'bg-btn text-gray-400 cursor-not-allowed opacity-60'
+              : 'bg-green-600 hover:bg-green-700 text-white'">
+      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M8 5v14l11-7z"/>
+      </svg>
+      Start
+    </button>
+    <button @click="stopPlan()"
+            :disabled="!running"
+            class="focus-ring flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-md transition-all duration-150"
+            :class="!running
+              ? 'bg-btn text-gray-400 cursor-not-allowed opacity-60'
+              : 'bg-red-600 hover:bg-red-700 text-white'">
+      <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <rect x="6" y="6" width="12" height="12" rx="1"/>
+      </svg>
+      Stop
+    </button>
+    <div class="flex items-center gap-2 ml-1" x-show="running">
+      <span aria-hidden="true" class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0"></span>
+      <span class="text-sm text-amber-700 font-medium">
+        Running: <span x-text="activePlan" class="font-mono text-amber-600"></span>
+      </span>
+    </div>
+    <span x-show="statusMsg" class="text-xs text-dim ml-auto" x-text="statusMsg"></span>
+  </footer>
+
+  <!-- Terminal output panel -->
+  <div x-show="termLines.length > 0" x-cloak
+       x-transition:enter="transition duration-200 ease-out"
+       x-transition:enter-start="opacity-0 translate-y-1"
+       x-transition:enter-end="opacity-100 translate-y-0"
+       class="h-44 bg-surface-deep border-t border-chrome overflow-y-auto p-3 terminal text-xs text-green-400/90 flex-shrink-0"
+       x-ref="termPanel">
+    <template x-for="(line, i) in termLines" :key="i">
+      <div x-text="line"></div>
+    </template>
+  </div>
+
+  <!-- ── Setup Modal ── -->
+  <div x-show="showSetup" x-cloak
+       class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
+       role="dialog" aria-modal="true" aria-labelledby="setup-modal-title" x-trap="showSetup">
+    <div class="bg-surface-raised rounded-xl w-full max-w-[540px] mx-4 max-h-[80vh] flex flex-col shadow-modal">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-chrome">
+        <span id="setup-modal-title" class="text-sm font-semibold text-gray-900">Robot Connection Setup</span>
+        <button @click="showSetup = false" aria-label="Close"
+                class="focus-ring w-7 h-7 flex items-center justify-center rounded-md text-dim hover:text-gray-900 hover:bg-gray-100 transition-colors duration-150 text-base leading-none">&times;</button>
+      </div>
+      <div class="p-5 space-y-4 overflow-y-auto flex-1">
+        <div x-show="!setupRunning && !setupDone" class="space-y-4">
+          <div>
+            <label for="setup-iface" class="block text-xs font-medium text-dim mb-1.5">Network Interface</label>
+            <input id="setup-iface" x-model="setupIface"
+                   class="focus-ring w-full bg-surface-input border border-chrome-input rounded-lg px-3 py-2 text-sm font-mono text-gray-900 transition-colors duration-150" />
+          </div>
+          <div>
+            <label for="setup-pass" class="block text-xs font-medium text-dim mb-1.5">Sudo Password</label>
+            <input id="setup-pass" type="password" x-model="setupPass"
+                   class="focus-ring w-full bg-surface-input border border-chrome-input rounded-lg px-3 py-2 text-sm font-mono text-gray-900 transition-colors duration-150" />
+          </div>
+        </div>
+
+        <!-- Progress steps -->
+        <div x-show="setupRunning || setupDone" class="space-y-3">
+          <template x-for="(step, i) in setupSteps" :key="i">
+            <div class="flex items-center gap-3">
+              <div class="w-5 h-5 flex items-center justify-center flex-shrink-0" aria-hidden="true">
+                <span x-show="step.state === 'pending'"
+                      class="w-4 h-4 rounded-full border-2 border-gray-300 block"></span>
+                <span x-show="step.state === 'running'">
+                  <svg class="spinner w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/>
+                    <path class="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                  </svg>
+                </span>
+                <span x-show="step.state === 'ok'"
+                      class="w-5 h-5 rounded-full bg-green-50 border border-green-200 flex items-center justify-center">
+                  <svg class="w-3 h-3 text-green-600" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                </span>
+                <span x-show="step.state === 'fail'"
+                      class="w-5 h-5 rounded-full bg-red-50 border border-red-200 flex items-center justify-center">
+                  <svg class="w-3 h-3 text-red-600" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </span>
+              </div>
+              <span class="text-sm transition-colors duration-150"
+                    :class="step.state === 'ok'      ? 'text-green-700'
+                          : step.state === 'fail'    ? 'text-red-600'
+                          : step.state === 'running' ? 'text-gray-800'
+                          :                            'text-gray-400'"
+                    x-text="step.label"></span>
+            </div>
+          </template>
+        </div>
+
+        <!-- Terminal output during setup -->
+        <div x-show="setupRunning || setupDone"
+             class="terminal text-xs text-green-400/90 bg-surface-deep rounded-lg p-3 h-32 overflow-y-auto border border-gray-200"
+             x-ref="setupTerm">
+          <template x-for="(line, i) in setupTermLines" :key="i">
+            <div x-text="line"></div>
+          </template>
+        </div>
+      </div>
+      <div class="px-5 py-4 border-t border-chrome flex justify-end gap-2.5">
+        <button @click="showSetup = false"
+                class="focus-ring px-4 py-2 text-sm text-gray-700 bg-btn hover:bg-btn rounded-md border border-chrome-input transition-colors duration-150">
+          Close
+        </button>
+        <button x-show="!setupRunning && !setupDone" @click="startConnect()"
+                class="focus-ring px-4 py-2 text-sm text-white bg-accent-ui hover:bg-accent-ui rounded-md font-semibold transition-colors duration-150">
+          Connect
+        </button>
+        <button x-show="setupDone && !connected" @click="resetSetup()"
+                class="focus-ring px-4 py-2 text-sm text-gray-700 bg-btn hover:bg-btn rounded-md border border-chrome-input transition-colors duration-150">
+          Retry
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Add / Edit Plan Modal ── -->
+  <div x-show="showPlanModal" x-cloak
+       class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
+       role="dialog" aria-modal="true" aria-labelledby="plan-modal-title" x-trap="showPlanModal">
+    <div class="bg-surface-raised rounded-xl w-full max-w-[700px] mx-4 max-h-[85vh] flex flex-col shadow-modal">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-chrome">
+        <span id="plan-modal-title" class="text-sm font-semibold text-gray-900"
+              x-text="editMode ? 'Edit Plan' : 'New Plan'"></span>
+        <button @click="showPlanModal = false" aria-label="Close"
+                class="focus-ring w-7 h-7 flex items-center justify-center rounded-md text-dim hover:text-gray-900 hover:bg-gray-100 transition-colors duration-150 text-base leading-none">&times;</button>
+      </div>
+      <div class="p-5 flex-1 overflow-y-auto space-y-4">
+        <div x-show="!editMode">
+          <label for="plan-name" class="block text-xs font-medium text-dim mb-1.5">Plan Name</label>
+          <input id="plan-name" x-model="modalName" placeholder="e.g. assembly_run_1"
+                 class="focus-ring w-full bg-surface-input border border-chrome-input rounded-lg px-3 py-2 text-sm font-mono text-gray-900 transition-colors duration-150" />
+        </div>
+        <div x-show="planModalError"
+             class="rounded-lg px-3 py-2.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200"
+             x-text="planModalError"></div>
+        <div>
+          <div class="flex items-center justify-between mb-2.5">
+            <span class="text-[10px] font-semibold text-dim uppercase tracking-widest">Steps</span>
+            <button @click="addStep()"
+                    class="focus-ring text-xs px-2.5 py-1 text-gray-700 bg-btn hover:bg-btn rounded-md border border-chrome-input transition-colors duration-150">
+              + Add Step
+            </button>
+          </div>
+          <div class="space-y-2">
+            <template x-for="(step, i) in modalSteps" :key="i">
+              <div class="bg-gray-50 border border-chrome rounded-lg p-3">
+                <div class="flex items-center gap-3 mb-2.5">
+                  <span class="text-xs text-gray-400 w-4 flex-shrink-0 font-mono" x-text="i + 1"></span>
+                  <select x-model="step.type"
+                          class="focus-ring bg-surface-input border border-chrome-input rounded-md px-2.5 py-1 text-sm font-mono text-gray-900 transition-colors duration-150">
+                    <option>MoveJ</option>
+                    <option>MoveL</option>
+                  </select>
+                  <button @click="modalSteps.splice(i, 1)"
+                          class="focus-ring ml-auto text-xs text-red-500 hover:text-red-700 px-2 py-0.5 rounded transition-colors duration-150">
+                    Remove
+                  </button>
+                </div>
+                <div class="grid grid-cols-6 gap-1 mb-2">
+                  <template x-for="(_, j) in [0,1,2,3,4,5]" :key="j">
+                    <input type="number" step="any"
+                           :placeholder="['X','Y','Z','Rx','Ry','Rz'][j]"
+                           :aria-label="['X','Y','Z','Rx','Ry','Rz'][j] + ', step ' + (i + 1)"
+                           x-model.number="step.pos[j]"
+                           class="focus-ring bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 w-full transition-colors duration-150" />
+                  </template>
+                </div>
+                <div class="grid grid-cols-3 gap-2">
+                  <div>
+                    <label :for="'step-vel-' + i" class="block text-[11px] text-gray-500 mb-1">Vel</label>
+                    <input :id="'step-vel-' + i" type="number" step="any" x-model.number="step.vel"
+                           class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
+                  </div>
+                  <div>
+                    <label :for="'step-acc-' + i" class="block text-[11px] text-gray-500 mb-1">Acc</label>
+                    <input :id="'step-acc-' + i" type="number" step="any" x-model.number="step.acc"
+                           class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
+                  </div>
+                  <div>
+                    <label :for="'step-time-' + i" class="block text-[11px] text-gray-500 mb-1">Time (s)</label>
+                    <input :id="'step-time-' + i" type="number" step="any" x-model.number="step.time"
+                           class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+      <div class="px-5 py-4 border-t border-chrome flex justify-end gap-2.5">
+        <button @click="showPlanModal = false"
+                class="focus-ring px-4 py-2 text-sm text-gray-700 bg-btn hover:bg-btn rounded-md border border-chrome-input transition-colors duration-150">
+          Cancel
+        </button>
+        <button @click="savePlan()"
+                class="focus-ring px-4 py-2 text-sm text-white bg-accent-ui hover:bg-accent-ui rounded-md font-semibold transition-colors duration-150">
+          Save Plan
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>

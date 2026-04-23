@@ -1,0 +1,9 @@
+.agents
+.claude/
+CLAUDE.md
+.impeccable.md
+skills-lock.json
+.venv/
+.vscode/
+__pycache__/
+*.pyc
