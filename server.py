@@ -25,6 +25,7 @@ _active_proc: Optional[subprocess.Popen] = None
 _active_plan: Optional[str] = None
 _rviz_proc: Optional[subprocess.Popen] = None
 _connected: bool = False
+_stop_requested: bool = False
 _ws_clients: list[WebSocket] = []
 
 
@@ -231,11 +232,15 @@ async def robot_start(body: StartBody):
     return {"ok": True}
 
 async def _watch_proc(proc: subprocess.Popen, plan_name: str):
-    global _active_proc, _active_plan
+    global _active_proc, _active_plan, _stop_requested
     loop = asyncio.get_event_loop()
     await _stream_proc(proc)
     rc = await loop.run_in_executor(None, proc.wait)
-    result = "success" if rc == 0 else "unknown" if rc < 0 else "fail"
+    if _stop_requested:
+        result = "success"
+        _stop_requested = False
+    else:
+        result = "unknown" if rc < 0 else "fail" # rc==0 spontaneous exit -> also treat as fail since we expect user to stop with SIGINT
     _record_stat(plan_name, result)
     await _broadcast(f"[DONE] Plan '{plan_name}' finished — {result}\n")
     _active_proc = None
@@ -243,9 +248,10 @@ async def _watch_proc(proc: subprocess.Popen, plan_name: str):
 
 @app.post("/api/robot/stop")
 async def robot_stop():
-    global _active_proc, _active_plan
+    global _active_proc, _active_plan, _stop_requested
     if not _active_proc or _active_proc.poll() is not None:
         raise HTTPException(409, "No plan running")
+    _stop_requested = True
     try:
         os.killpg(os.getpgid(_active_proc.pid), signal.SIGINT)
     except ProcessLookupError:
