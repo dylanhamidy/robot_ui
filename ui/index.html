@@ -411,10 +411,10 @@
                 <div class="grid grid-cols-6 gap-1 mb-1">
                   <template x-for="(_, j) in [0,1,2,3,4,5]" :key="j">
                     <input type="number" step="any"
-                           :placeholder="step.type === 'MoveL'
+                           :placeholder="step.type === 'MoveJ'
                              ? ['J1','J2','J3','J4','J5','J6'][j]
                              : ['X','Y','Z','A','B','C'][j]"
-                           :aria-label="step.type === 'MoveL'
+                           :aria-label="step.type === 'MoveJ'
                              ? (['J1','J2','J3','J4','J5','J6'][j] + '°, step ' + (i + 1))
                              : (j < 3
                                  ? (['X','Y','Z'][j] + ' mm, step ' + (i + 1))
@@ -424,7 +424,7 @@
                   </template>
                 </div>
                 <div class="text-[10px] text-dim mb-2"
-                     x-text="step.type === 'MoveL'
+                     x-text="step.type === 'MoveJ'
                        ? 'J1 – J6 (all degrees)'
                        : 'X, Y, Z (mm) · A, B, C (degrees)'"></div>
                 <div class="grid grid-cols-3 gap-2">

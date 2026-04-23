@@ -224,7 +224,8 @@ async def robot_start(body: StartBody):
     _active_plan = body.plan_name
     _active_proc = subprocess.Popen(
         ["ros2", "run", "lux_dsr_control", "move_joint_node", "--plan-file", str(p.resolve())],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        preexec_fn=os.setsid
     )
     asyncio.get_event_loop().create_task(_watch_proc(_active_proc, body.plan_name))
     return {"ok": True}
@@ -245,12 +246,23 @@ async def robot_stop():
     global _active_proc, _active_plan
     if not _active_proc or _active_proc.poll() is not None:
         raise HTTPException(409, "No plan running")
-    _active_proc.send_signal(signal.SIGINT)
+    try:
+        os.killpg(os.getpgid(_active_proc.pid), signal.SIGINT)
+    except ProcessLookupError:
+        pass
     return {"ok": True}
 
 @app.post("/api/robot/disconnect")
 async def robot_disconnect():
-    global _rviz_proc, _connected
+    global _rviz_proc, _connected, _active_proc, _active_plan
+    # Stop any running plan first
+    if _active_proc and _active_proc.poll() is None:
+        try:
+            os.killpg(os.getpgid(_active_proc.pid), signal.SIGINT)
+        except ProcessLookupError:
+            pass
+
+    # Kill RViz process gorup
     if _rviz_proc and _rviz_proc.poll() is None:
         try:
             os.killpg(os.getpgid(_rviz_proc.pid), signal.SIGINT)
