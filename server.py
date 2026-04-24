@@ -3,6 +3,7 @@ import json
 import os
 import signal
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -234,8 +235,11 @@ async def robot_start(body: StartBody):
 async def _watch_proc(proc: subprocess.Popen, plan_name: str):
     global _active_proc, _active_plan, _stop_requested
     loop = asyncio.get_event_loop()
+    t_start = time.monotonic()
     await _stream_proc(proc)
     rc = await loop.run_in_executor(None, proc.wait)
+    elapsed = time.monotonic() - t_start
+    await _broadcast(f"[STAT] Finished in {elapsed:.1f}s\n")
     if _stop_requested:
         result = "success"
         _stop_requested = False

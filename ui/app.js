@@ -7,6 +7,7 @@ function app() {
     activePlan: null,
     statusMsg: "",
     termLines: [],
+    termExpanded: false,
 
     // Setup modal
     showSetup: false,
@@ -43,7 +44,7 @@ function app() {
         const lines = e.data.split("\n");
         for (const l of lines) {
           if (l === "") continue;
-          this.termLines.push(l);
+          this.termLines.push({ text: l, type: this.classifyLine(l) });
           if (this.termLines.length > 500) this.termLines.shift();
           this.setupTermLines.push(l);
           if (this.setupTermLines.length > 500) this.setupTermLines.shift();
@@ -232,6 +233,29 @@ function app() {
       await fetch(`/api/plans/${this.selected.name}`, { method: "DELETE" });
       this.selected = null;
       await this.loadPlans();
+    },
+
+    classifyLine(l) {
+      if (l.includes("[CONNECTED]") || l.includes("[DONE]")) return "sentinel-success";
+      if (l.includes("[ERROR]") || l.includes("[DISCONNECTED]")) return "sentinel-error";
+      if (l.startsWith("[STEP]") || l.startsWith("[INFO]") || l.startsWith("[STAT]")) return "stat";
+      return "log";
+    },
+
+    termLineClass(type) {
+      if (type === "sentinel-success") return "text-green-700 font-semibold";
+      if (type === "sentinel-error")   return "text-red-600 font-semibold";
+      if (type === "stat")             return "text-gray-400";
+      return "text-green-700"; // log
+    },
+
+    toggleTerm() {
+      this.termExpanded = !this.termExpanded;
+      if (this.termExpanded) {
+        this.$nextTick(() => {
+          if (this.$refs.termPanel) this.$refs.termPanel.scrollTop = 9999;
+        });
+      }
     },
 
     // ── Robot control ────────────────────────────────────────────────────────

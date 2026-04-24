@@ -7,3 +7,4 @@ skills-lock.json
 .vscode/
 __pycache__/
 *.pyc
+progress.md

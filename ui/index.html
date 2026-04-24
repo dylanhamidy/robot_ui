@@ -32,6 +32,8 @@
       --btn-secondary-hover: #e5e7eb;   /* gray-200 — secondary button hover */
       --btn-primary:         #111827;   /* near-black — primary actions */
       --btn-primary-hover:   #374151;   /* gray-700 — primary hover */
+      --surface-term-bar:    #f1f5f9;   /* terminal title bar — slate-100 chrome */
+      --surface-terminal:    #f8fafc;   /* terminal body — slate-50 light bg */
     }
 
     /* Token utilities — Tailwind doesn't know about these */
@@ -39,6 +41,8 @@
     .bg-surface-raised          { background-color: var(--surface-raised); }
     .bg-surface-input           { background-color: var(--surface-input); }
     .bg-surface-deep            { background-color: var(--surface-deep); }
+    .bg-surface-term-bar        { background-color: var(--surface-term-bar); }
+    .bg-surface-terminal        { background-color: var(--surface-terminal); }
     .border-chrome              { border-color: var(--border); }
     .border-chrome-input        { border-color: var(--border-input); }
     .text-dim                   { color: var(--text-muted); }
@@ -202,7 +206,7 @@
                 <tr class="text-dim text-[10px] font-semibold uppercase tracking-wider border-b border-chrome">
                   <th class="pb-2.5 text-left w-8 font-semibold">#</th>
                   <th class="pb-2.5 text-left w-20 font-semibold">Type</th>
-                  <th class="pb-2.5 text-left font-semibold">Position <span class="normal-case tracking-normal font-normal text-dim">(MoveL: J1–J6 deg · MoveJ: X/Y/Z mm, A/B/C deg)</span></th>
+                  <th class="pb-2.5 text-left font-semibold">Position <span class="normal-case tracking-normal font-normal text-dim">(MoveL: X/Y/Z mm, A/B/C deg · MoveJ: J1–J6 deg)</span></th>
                   <th class="pb-2.5 text-left w-16 font-semibold">Vel</th>
                   <th class="pb-2.5 text-left w-16 font-semibold">Acc</th>
                   <th class="pb-2.5 text-left w-16 font-semibold">Time</th>
@@ -231,6 +235,47 @@
           </div>
         </div>
       </template>
+
+      <!-- Execution terminal panel — inline at bottom of main content -->
+      <div x-show="termLines.length > 0" x-cloak
+           class="flex-shrink-0 flex flex-col border-t border-chrome">
+
+        <!-- Terminal body — expands upward from title bar -->
+        <div x-show="termExpanded"
+             x-transition:enter="transition ease-out duration-200"
+             x-transition:enter-start="opacity-0 translate-y-2"
+             x-transition:enter-end="opacity-100 translate-y-0"
+             x-transition:leave="transition ease-in duration-150"
+             x-transition:leave-start="opacity-100 translate-y-0"
+             x-transition:leave-end="opacity-0 translate-y-2"
+             class="h-52 bg-surface-terminal overflow-y-auto p-3 terminal text-xs"
+             x-ref="termPanel">
+          <template x-for="(line, i) in termLines" :key="i">
+            <div x-text="line.text" :class="termLineClass(line.type)"></div>
+          </template>
+        </div>
+
+        <!-- Title bar — always visible when termLines exist -->
+        <button @click="toggleTerm()"
+                class="focus-ring w-full flex items-center justify-between px-4 py-2.5 bg-surface-term-bar hover:bg-btn border-t border-chrome transition-colors duration-150"
+                :aria-expanded="termExpanded"
+                aria-label="Toggle execution output">
+          <div class="flex items-center gap-2.5">
+            <span class="text-xs font-medium text-gray-600">Execution Output</span>
+            <span x-show="running" class="flex items-center gap-1.5">
+              <span aria-hidden="true" class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse flex-shrink-0"></span>
+              <span class="text-xs text-amber-600 font-mono" x-text="activePlan"></span>
+            </span>
+          </div>
+          <svg class="w-3.5 h-3.5 text-gray-400 transition-transform duration-200"
+               :class="termExpanded ? 'rotate-180' : ''"
+               fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"
+               aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7" />
+          </svg>
+        </button>
+
+      </div>
     </main>
   </div>
 
@@ -267,17 +312,6 @@
     <span x-show="statusMsg" class="text-xs text-dim ml-auto" x-text="statusMsg"></span>
   </footer>
 
-  <!-- Terminal output panel -->
-  <div x-show="termLines.length > 0" x-cloak
-       x-transition:enter="transition duration-200 ease-out"
-       x-transition:enter-start="opacity-0 translate-y-1"
-       x-transition:enter-end="opacity-100 translate-y-0"
-       class="h-44 bg-surface-deep border-t border-chrome overflow-y-auto p-3 terminal text-xs text-green-400/90 flex-shrink-0"
-       x-ref="termPanel">
-    <template x-for="(line, i) in termLines" :key="i">
-      <div x-text="line"></div>
-    </template>
-  </div>
 
   <!-- ── Setup Modal ── -->
   <div x-show="showSetup" x-cloak
