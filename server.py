@@ -1,9 +1,11 @@
+import atexit
 import asyncio
 import json
 import os
 import signal
 import subprocess
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -19,7 +21,14 @@ STATS_DIR = BASE / "stats"
 PLANS_DIR.mkdir(exist_ok=True)
 STATS_DIR.mkdir(exist_ok=True)
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    _kill_robot_procs()  # resolved at call time — defined below
+
+
+app = FastAPI(lifespan=lifespan)
 
 # ── state ──────────────────────────────────────────────────────────────────
 _active_proc: Optional[subprocess.Popen] = None
@@ -29,9 +38,38 @@ _rviz_proc: Optional[subprocess.Popen] = None
 _connected: bool = False
 _stop_requested: bool = False
 _ws_clients: list[WebSocket] = []
+_disconnect_task: Optional[asyncio.Task] = None
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
+
+def _kill_robot_procs():
+    """Kill all robot subprocesses. Synchronous and idempotent — safe to call from atexit."""
+    global _active_proc, _rviz_proc
+    for proc in filter(None, [_active_proc, _rviz_proc]):
+        if proc.poll() is None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+                proc.wait(timeout=3)
+            except (ProcessLookupError, subprocess.TimeoutExpired, OSError):
+                pass
+
+atexit.register(_kill_robot_procs)
+
+async def _schedule_safety_shutdown():
+    """Grace-period watchdog: if no browser client reconnects within 8 s, stop the robot."""
+    await asyncio.sleep(8)
+    global _connected, _active_plan, _build_proc
+    if _ws_clients:
+        return
+    if _build_proc is not None:
+        try:
+            _build_proc.kill()
+        except (ProcessLookupError, OSError):
+            pass
+    _kill_robot_procs()
+    _connected = False
+    _active_plan = None
 
 def _plan_path(name: str) -> Path:
     return PLANS_DIR / f"{name}.json"
@@ -367,14 +405,24 @@ async def robot_status():
 
 @app.websocket("/ws/terminal")
 async def ws_terminal(ws: WebSocket):
+    global _disconnect_task
     await ws.accept()
     _ws_clients.append(ws)
+    # Cancel any pending safety-shutdown watchdog — client is back
+    if _disconnect_task and not _disconnect_task.done():
+        _disconnect_task.cancel()
+        _disconnect_task = None
     try:
         while True:
             await ws.receive_text()
     except WebSocketDisconnect:
         if ws in _ws_clients:
             _ws_clients.remove(ws)
+        # Start watchdog only when the last client drops
+        if not _ws_clients:
+            _disconnect_task = asyncio.get_event_loop().create_task(
+                _schedule_safety_shutdown()
+            )
 
 
 if __name__ == "__main__":

@@ -248,7 +248,7 @@ function app() {
     classifyLine(l) {
       if (l.includes("[CONNECTED]") || l.includes("[DONE]")) return "sentinel-success";
       if (l.includes("[ERROR]") || l.includes("[DISCONNECTED]")) return "sentinel-error";
-      if (l.startsWith("[STEP]") || l.startsWith("[INFO]")) return "step";
+      if (l.startsWith("[STEP]")) return "step";
       return "stat";
     },
 
