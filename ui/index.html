@@ -236,9 +236,8 @@
         </div>
       </template>
 
-      <!-- Execution terminal panel — inline at bottom of main content -->
-      <div x-show="termLines.length > 0" x-cloak
-           class="flex-shrink-0 flex flex-col border-t border-chrome">
+      <!-- Execution terminal panel — always visible at bottom of main content -->
+      <div class="flex-shrink-0 flex flex-col border-t border-chrome">
 
         <!-- Terminal body — expands upward from title bar -->
         <div x-show="termExpanded"
@@ -248,16 +247,19 @@
              x-transition:leave="transition ease-in duration-150"
              x-transition:leave-start="opacity-100 translate-y-0"
              x-transition:leave-end="opacity-0 translate-y-2"
-             class="h-52 bg-surface-terminal overflow-y-auto p-3 terminal text-xs"
+             class="h-52 bg-surface-terminal overflow-y-auto p-3 terminal text-xs border-b border-chrome"
              x-ref="termPanel">
+          <template x-if="termLines.length === 0">
+            <div class="text-gray-400 select-none">No output yet — run a plan to see execution logs.</div>
+          </template>
           <template x-for="(line, i) in termLines" :key="i">
             <div x-text="line.text" :class="termLineClass(line.type)"></div>
           </template>
         </div>
 
-        <!-- Title bar — always visible when termLines exist -->
+        <!-- Title bar — always visible -->
         <button @click="toggleTerm()"
-                class="focus-ring w-full flex items-center justify-between px-4 py-2.5 bg-surface-term-bar hover:bg-btn border-t border-chrome transition-colors duration-150"
+                class="focus-ring w-full flex items-center justify-between px-4 py-2.5 bg-surface-term-bar hover:bg-btn transition-colors duration-150"
                 :aria-expanded="termExpanded"
                 aria-label="Toggle execution output">
           <div class="flex items-center gap-2.5">
@@ -375,10 +377,10 @@
 
         <!-- Terminal output during setup -->
         <div x-show="setupRunning || setupDone"
-             class="terminal text-xs text-green-400/90 bg-surface-deep rounded-lg p-3 h-32 overflow-y-auto border border-gray-200"
+             class="terminal text-xs bg-surface-terminal rounded-lg p-3 h-32 overflow-y-auto border border-chrome"
              x-ref="setupTerm">
           <template x-for="(line, i) in setupTermLines" :key="i">
-            <div x-text="line"></div>
+            <div x-text="line" :class="termLineClass(classifyLine(line))"></div>
           </template>
         </div>
       </div>
