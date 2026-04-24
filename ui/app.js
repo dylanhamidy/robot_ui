@@ -248,15 +248,15 @@ function app() {
     classifyLine(l) {
       if (l.includes("[CONNECTED]") || l.includes("[DONE]")) return "sentinel-success";
       if (l.includes("[ERROR]") || l.includes("[DISCONNECTED]")) return "sentinel-error";
-      if (l.startsWith("[STEP]") || l.startsWith("[INFO]") || l.startsWith("[STAT]")) return "stat";
-      return "log";
+      if (l.startsWith("[STEP]") || l.startsWith("[INFO]")) return "step";
+      return "stat";
     },
 
     termLineClass(type) {
       if (type === "sentinel-success") return "text-green-700 font-semibold";
       if (type === "sentinel-error")   return "text-red-600 font-semibold";
-      if (type === "stat")             return "text-gray-400";
-      return "text-green-700"; // log
+      if (type === "step")             return "text-green-500";
+      return "text-gray-400";
     },
 
     toggleTerm() {
