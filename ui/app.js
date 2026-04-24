@@ -17,6 +17,7 @@ function app() {
     setupDone: false,
     setupTermLines: [],
     setupSteps: [
+      { label: "Robot workspace", state: "pending" },
       { label: "Configuring PC IP address...", state: "pending" },
       { label: "Pinging robot at 192.168.0.20...", state: "pending" },
       { label: "Launching RViz in real mode...", state: "pending" },
@@ -50,16 +51,24 @@ function app() {
           if (this.setupTermLines.length > 500) this.setupTermLines.shift();
 
           // Parse progress markers emitted by server.py
-          if (l.includes("[STEP] Configuring")) {
+          if (l.includes("[STEP] Checking robot workspace")) {
             this.setupSteps[0].state = "running";
-          } else if (l.includes("[STEP] Pinging")) {
+            this.setupSteps[0].label = "Checking robot workspace...";
+          } else if (l.includes("[STEP] Building robot workspace")) {
+            this.setupSteps[0].label = "Building robot workspace...";
+          } else if (l.includes("[INFO] Workspace ready")) {
             this.setupSteps[0].state = "ok";
+            this.setupSteps[0].label = "Robot workspace ready";
+          } else if (l.includes("[STEP] Configuring")) {
             this.setupSteps[1].state = "running";
-          } else if (l.includes("[STEP] Launching")) {
+          } else if (l.includes("[STEP] Pinging")) {
             this.setupSteps[1].state = "ok";
             this.setupSteps[2].state = "running";
-          } else if (l.includes("[INFO] RViz")) {
+          } else if (l.includes("[STEP] Launching")) {
             this.setupSteps[2].state = "ok";
+            this.setupSteps[3].state = "running";
+          } else if (l.includes("[INFO] RViz")) {
+            this.setupSteps[3].state = "ok";
           } else if (l.includes("[CONNECTED]")) {
             this.connected = true;
             this.setupDone = true;
@@ -121,6 +130,7 @@ function app() {
       this.setupDone = false;
       this.setupTermLines = [];
       this.setupSteps = [
+        { label: "Robot workspace", state: "pending" },
         { label: "Configuring PC IP address...", state: "pending" },
         { label: "Pinging robot at 192.168.0.20...", state: "pending" },
         { label: "Launching RViz in real mode...", state: "pending" },
@@ -271,6 +281,10 @@ function app() {
         this.running = true;
         this.activePlan = this.selected.name;
         this.statusMsg = "";
+        this.termExpanded = true;
+        this.$nextTick(() => {
+          if (this.$refs.termPanel) this.$refs.termPanel.scrollTop = 9999;
+        });
       } else {
         this.statusMsg = "Start failed: " + (await r.json()).detail;
       }

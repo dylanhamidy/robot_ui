@@ -24,6 +24,7 @@ app = FastAPI()
 # ── state ──────────────────────────────────────────────────────────────────
 _active_proc: Optional[subprocess.Popen] = None
 _active_plan: Optional[str] = None
+_build_proc = None  # asyncio.subprocess.Process during colcon build
 _rviz_proc: Optional[subprocess.Popen] = None
 _connected: bool = False
 _stop_requested: bool = False
@@ -186,6 +187,26 @@ async def robot_connect(body: ConnectBody):
             raise RuntimeError(f"{label} failed (exit {rc})")
 
     try:
+        # Step 0: ensure the ROS workspace is built
+        await _broadcast("\n[STEP] Checking robot workspace...\n")
+        ws_setup = Path.home() / "ros2_ws" / "install" / "setup.bash"
+        if not ws_setup.exists():
+            await _broadcast("[STEP] Building robot workspace...\n")
+            build = await asyncio.create_subprocess_shell(
+                "source /opt/ros/humble/setup.bash && "
+                "cd ~/ros2_ws && "
+                "colcon build --packages-select lux_dsr_control --symlink-install 2>&1",
+                executable="/bin/bash",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            async for chunk in build.stdout:
+                await _broadcast(chunk.decode(errors="replace"))
+            build_rc = await build.wait()
+            if build_rc != 0:
+                raise RuntimeError(f"Workspace build failed (exit {build_rc})")
+        await _broadcast("[INFO] Workspace ready\n")
+
         await run_step(
             f"echo '{pw}' | sudo -S ip addr flush dev {iface} && "
             f"echo '{pw}' | sudo -S ip link set {iface} up && "
@@ -217,20 +238,66 @@ class StartBody(BaseModel):
 
 @app.post("/api/robot/start")
 async def robot_start(body: StartBody):
-    global _active_proc, _active_plan
-    if _active_proc and _active_proc.poll() is None:
+    global _active_plan
+    if (_active_proc and _active_proc.poll() is None) or _active_plan is not None:
         raise HTTPException(409, "A plan is already running")
     p = _plan_path(body.plan_name)
     if not p.exists():
         raise HTTPException(404, "Plan not found")
     _active_plan = body.plan_name
-    _active_proc = subprocess.Popen(
-        ["ros2", "run", "lux_dsr_control", "move_joint_node", "--plan-file", str(p.resolve())],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        preexec_fn=os.setsid
-    )
-    asyncio.get_event_loop().create_task(_watch_proc(_active_proc, body.plan_name))
+    asyncio.get_event_loop().create_task(_run_plan_task(body.plan_name, p.resolve()))
     return {"ok": True}
+
+async def _run_plan_task(plan_name: str, plan_path: Path):
+    global _active_proc, _active_plan, _build_proc
+
+    # Check if the package is already built
+    await _broadcast("[STEP] Checking lux_dsr_control package...\n")
+    check = await asyncio.create_subprocess_shell(
+        "source /opt/ros/humble/setup.bash && "
+        "source ~/ros2_ws/install/setup.bash && "
+        "ros2 pkg list 2>/dev/null | grep -q lux_dsr_control",
+        executable="/bin/bash",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    pkg_found = (await check.wait()) == 0
+
+    if not pkg_found:
+        await _broadcast("[STEP] Building lux_dsr_control...\n")
+        build = await asyncio.create_subprocess_shell(
+            "source /opt/ros/humble/setup.bash && "
+            "cd ~/ros2_ws && "
+            "colcon build --packages-select lux_dsr_control --symlink-install 2>&1",
+            executable="/bin/bash",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        _build_proc = build
+        async for chunk in build.stdout:
+            await _broadcast(chunk.decode(errors="replace"))
+        build_rc = await build.wait()
+        _build_proc = None
+
+        if build_rc != 0:
+            label = "Build cancelled" if build_rc < 0 else f"Build failed (exit {build_rc})"
+            await _broadcast(f"[ERROR] {label}\n")
+            await _broadcast(f"[DONE] Plan '{plan_name}' aborted — build error\n")
+            _active_plan = None
+            return
+
+        await _broadcast("[INFO] Build succeeded\n")
+
+    # Source ROS env and launch the plan node
+    _active_proc = subprocess.Popen(
+        "source /opt/ros/humble/setup.bash && "
+        "source ~/ros2_ws/install/setup.bash && "
+        f"ros2 run lux_dsr_control move_joint_node --plan-file {plan_path}",
+        shell=True, executable="/bin/bash",
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        preexec_fn=os.setsid,
+    )
+    await _watch_proc(_active_proc, plan_name)
 
 async def _watch_proc(proc: subprocess.Popen, plan_name: str):
     global _active_proc, _active_plan, _stop_requested
@@ -252,7 +319,14 @@ async def _watch_proc(proc: subprocess.Popen, plan_name: str):
 
 @app.post("/api/robot/stop")
 async def robot_stop():
-    global _active_proc, _active_plan, _stop_requested
+    global _active_proc, _active_plan, _stop_requested, _build_proc
+    # If still in the build phase, kill the build process
+    if _build_proc is not None and _build_proc.returncode is None:
+        try:
+            _build_proc.kill()
+        except ProcessLookupError:
+            pass
+        return {"ok": True}
     if not _active_proc or _active_proc.poll() is not None:
         raise HTTPException(409, "No plan running")
     _stop_requested = True
@@ -285,7 +359,8 @@ async def robot_disconnect():
 
 @app.get("/api/robot/status")
 async def robot_status():
-    running = _active_proc is not None and _active_proc.poll() is None
+    proc_running = _active_proc is not None and _active_proc.poll() is None
+    running = proc_running or _active_plan is not None
     return {"connected": _connected, "running": running, "active_plan": _active_plan}
 
 # ── WebSocket ──────────────────────────────────────────────────────────────
