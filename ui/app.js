@@ -8,6 +8,7 @@ function app() {
     statusMsg: "",
     termLines: [],
     termExpanded: false,
+    darkMode: localStorage.getItem('darkMode') === 'true',
 
     // Setup modal
     showSetup: false,
@@ -33,9 +34,16 @@ function app() {
     ws: null,
 
     async init() {
+      document.documentElement.classList.toggle('dark', this.darkMode);
       await this.loadPlans();
       this.pollStatus();
       this.connectWS();
+    },
+
+    toggleDark() {
+      this.darkMode = !this.darkMode;
+      localStorage.setItem('darkMode', this.darkMode);
+      document.documentElement.classList.toggle('dark', this.darkMode);
     },
 
     connectWS() {

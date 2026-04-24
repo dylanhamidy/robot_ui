@@ -1,6 +1,7 @@
 .agents
 .claude/
 CLAUDE.md
+CLAUDE.original.md
 .impeccable.md
 skills-lock.json
 .venv/
