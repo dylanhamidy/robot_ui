@@ -236,57 +236,6 @@
         </label>
       </div>
 
-      <!-- Hand Teach — only when connected -->
-      <div x-show="connected" x-cloak class="border-t border-chrome p-2 space-y-1.5">
-        <div class="text-[10px] font-semibold uppercase tracking-widest text-dim px-1 pt-0.5 pb-1">Hand Teach</div>
-
-        <!-- Enable / Disable -->
-        <button x-show="!handGuideEnabled" @click="enableHandGuide()" :disabled="handGuideLoading"
-                class="focus-ring w-full py-2 text-xs font-medium rounded-md border transition-colors duration-150"
-                :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-btn text-gray-400 border-chrome-input' : 'bg-btn hover:bg-btn text-gray-700 border-chrome-input'">
-          Enable Hand Guide
-        </button>
-        <button x-show="handGuideEnabled" @click="disableHandGuide()" :disabled="handGuideLoading"
-                class="focus-ring w-full py-2 text-xs font-medium rounded-md border transition-colors duration-150"
-                :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-amber-50 text-amber-400 border-amber-200' : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'">
-          Disable Hand Guide
-        </button>
-
-        <!-- MoveJ / MoveL toggle -->
-        <div x-show="handGuideEnabled" class="flex rounded-md overflow-hidden border border-chrome-input">
-          <button @click="setMoveType('MoveJ')"
-                  class="focus-ring flex-1 py-1.5 text-xs font-medium transition-colors duration-150"
-                  :class="captureType === 'MoveJ' ? 'bg-accent-ui text-white' : 'bg-btn text-gray-700 hover:bg-btn'">
-            MoveJ
-          </button>
-          <button @click="setMoveType('MoveL')"
-                  class="focus-ring flex-1 py-1.5 text-xs font-medium transition-colors duration-150"
-                  :class="captureType === 'MoveL' ? 'bg-accent-ui text-white' : 'bg-btn text-gray-700 hover:bg-btn'">
-            MoveL
-          </button>
-        </div>
-
-        <!-- Record / Clear / Save -->
-        <div x-show="handGuideEnabled" class="space-y-1">
-          <button @click="recordPoint()" :disabled="handGuideLoading"
-                  class="focus-ring w-full py-2 text-xs font-semibold rounded-md transition-colors duration-150"
-                  :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-green-600 text-white' : 'bg-green-600 hover:bg-green-700 text-white'">
-            <span aria-hidden="true">●</span> Record Point
-          </button>
-          <div class="flex gap-1">
-            <button @click="clearCapture()" :disabled="handGuideLoading"
-                    class="focus-ring flex-1 py-1.5 text-xs font-medium rounded-md border border-chrome-input transition-colors duration-150"
-                    :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-btn text-gray-400' : 'bg-btn hover:bg-btn text-gray-700'">
-              Clear
-            </button>
-            <button @click="saveCapturedPlan()" :disabled="handGuideLoading"
-                    class="focus-ring flex-1 py-1.5 text-xs font-medium rounded-md transition-colors duration-150"
-                    :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-accent-ui text-white' : 'bg-accent-ui hover:bg-accent-ui text-white'">
-              Save Plan
-            </button>
-          </div>
-        </div>
-      </div>
     </aside>
 
     <!-- Right: Plan detail -->
@@ -532,13 +481,33 @@
        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
        role="dialog" aria-modal="true" aria-labelledby="plan-modal-title" x-trap="showPlanModal">
     <div class="bg-surface-raised rounded-xl w-full max-w-[700px] mx-4 max-h-[85vh] flex flex-col shadow-modal">
+
+      <!-- Modal header -->
       <div class="flex items-center justify-between px-5 py-4 border-b border-chrome">
         <span id="plan-modal-title" class="text-sm font-semibold text-gray-900"
               x-text="editMode ? 'Edit Plan' : 'New Plan'"></span>
-        <button @click="showPlanModal = false" aria-label="Close"
+        <button @click="closePlanModal()" aria-label="Close"
                 class="focus-ring w-7 h-7 flex items-center justify-center rounded-md text-dim hover:text-gray-900 hover:bg-gray-100 transition-colors duration-150 text-base leading-none">&times;</button>
       </div>
-      <div class="p-5 flex-1 overflow-y-auto space-y-4">
+
+      <!-- Mode tabs (only when connected) -->
+      <div x-show="connected" class="px-5 pt-4 pb-0">
+        <div class="flex gap-1 p-1 bg-gray-100 rounded-lg w-fit">
+          <button @click="planMode = 'manual'"
+                  class="focus-ring px-4 py-1.5 text-xs font-medium rounded-md transition-all duration-150"
+                  :class="planMode === 'manual' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'">
+            Manual Steps
+          </button>
+          <button @click="planMode = 'handguide'"
+                  class="focus-ring px-4 py-1.5 text-xs font-medium rounded-md transition-all duration-150"
+                  :class="planMode === 'handguide' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'">
+            Hand Guide
+          </button>
+        </div>
+      </div>
+
+      <!-- Manual mode body -->
+      <div x-show="planMode === 'manual'" class="p-5 flex-1 overflow-y-auto space-y-4">
         <div x-show="!editMode">
           <label for="plan-name" class="block text-xs font-medium text-dim mb-1.5">Plan Name</label>
           <input id="plan-name" x-model="modalName" placeholder="e.g. assembly_run_1"
@@ -611,16 +580,79 @@
           </div>
         </div>
       </div>
+
+      <!-- Hand guide mode body -->
+      <div x-show="planMode === 'handguide'" class="p-5 flex-1 flex flex-col gap-4">
+        <p class="text-xs text-dim">Guide the arm to each waypoint and record. Save when done — plan imports automatically.</p>
+
+        <!-- Enable / Disable -->
+        <div>
+          <button x-show="!handGuideEnabled" @click="enableHandGuide()" :disabled="handGuideLoading"
+                  class="focus-ring w-full py-2.5 text-sm font-medium rounded-lg border transition-colors duration-150"
+                  :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-btn text-gray-400 border-chrome-input' : 'bg-btn hover:bg-btn text-gray-700 border-chrome-input'">
+            Enable Hand Guide
+          </button>
+          <button x-show="handGuideEnabled" @click="disableHandGuide()" :disabled="handGuideLoading"
+                  class="focus-ring w-full py-2.5 text-sm font-medium rounded-lg border transition-colors duration-150"
+                  :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-amber-50 text-amber-400 border-amber-200' : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'">
+            Disable Hand Guide
+          </button>
+        </div>
+
+        <!-- MoveJ / MoveL + Record (only when enabled) -->
+        <div x-show="handGuideEnabled" class="space-y-3">
+          <!-- Type toggle -->
+          <div>
+            <p class="text-[11px] text-dim mb-1.5">Move type for next recorded point</p>
+            <div class="flex rounded-lg overflow-hidden border border-chrome-input w-fit">
+              <button @click="setMoveType('MoveJ')"
+                      class="focus-ring px-5 py-2 text-xs font-medium transition-colors duration-150"
+                      :class="captureType === 'MoveJ' ? 'bg-accent-ui text-white' : 'bg-btn text-gray-700 hover:bg-btn'">
+                MoveJ
+              </button>
+              <button @click="setMoveType('MoveL')"
+                      class="focus-ring px-5 py-2 text-xs font-medium transition-colors duration-150"
+                      :class="captureType === 'MoveL' ? 'bg-accent-ui text-white' : 'bg-btn text-gray-700 hover:bg-btn'">
+                MoveL
+              </button>
+            </div>
+          </div>
+
+          <!-- Record -->
+          <button @click="recordPoint()" :disabled="handGuideLoading"
+                  class="focus-ring w-full py-3 text-sm font-semibold rounded-lg transition-colors duration-150"
+                  :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-green-600 text-white' : 'bg-green-600 hover:bg-green-700 text-white'">
+            <span aria-hidden="true">●</span> Record Point
+          </button>
+
+          <!-- Clear + Save -->
+          <div class="flex gap-2 pt-1">
+            <button @click="clearCapture()" :disabled="handGuideLoading"
+                    class="focus-ring flex-1 py-2 text-xs font-medium rounded-lg border border-chrome-input transition-colors duration-150"
+                    :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-btn text-gray-400' : 'bg-btn hover:bg-btn text-gray-700'">
+              Clear Points
+            </button>
+            <button @click="saveCapturedPlan()" :disabled="handGuideLoading"
+                    class="focus-ring flex-1 py-2 text-xs font-semibold rounded-lg transition-colors duration-150"
+                    :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-accent-ui text-white' : 'bg-accent-ui hover:bg-accent-ui text-white'">
+              Save Plan
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
       <div class="px-5 py-4 border-t border-chrome flex justify-end gap-2.5">
-        <button @click="showPlanModal = false"
+        <button @click="closePlanModal()"
                 class="focus-ring px-4 py-2 text-sm text-gray-700 bg-btn hover:bg-btn rounded-md border border-chrome-input transition-colors duration-150">
-          Cancel
+          <span x-text="planMode === 'handguide' ? 'Close' : 'Cancel'"></span>
         </button>
-        <button @click="savePlan()"
+        <button x-show="planMode === 'manual'" @click="savePlan()"
                 class="focus-ring px-4 py-2 text-sm text-white bg-accent-ui hover:bg-accent-ui rounded-md font-semibold transition-colors duration-150">
           Save Plan
         </button>
       </div>
+
     </div>
   </div>
 

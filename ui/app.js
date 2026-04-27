@@ -27,6 +27,7 @@ function app() {
     // Plan modal
     showPlanModal: false,
     editMode: false,
+    planMode: 'manual',
     modalName: "",
     modalSteps: [],
     planModalError: "",
@@ -171,6 +172,7 @@ function app() {
 
     openAddPlan() {
       this.editMode = false;
+      this.planMode = 'manual';
       this.modalName = "";
       this.modalSteps = [];
       this.planModalError = "";
@@ -180,6 +182,7 @@ function app() {
     openEditPlan() {
       if (!this.selected) return;
       this.editMode = true;
+      this.planMode = 'manual';
       this.planModalError = "";
       this.modalName = this.selected.name;
       this.modalSteps = JSON.parse(JSON.stringify(this.selected.steps)).map(
@@ -361,11 +364,17 @@ function app() {
       this.handGuideLoading = false;
     },
 
+    async closePlanModal() {
+      if (this.handGuideEnabled) await this.disableHandGuide();
+      this.showPlanModal = false;
+    },
+
     async saveCapturedPlan() {
       this.handGuideLoading = true;
       this.termExpanded = true;
       await fetch("/api/robot/hand_guide/save", { method: "POST" });
       this.handGuideLoading = false;
+      this.showPlanModal = false;
     },
   };
 }
