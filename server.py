@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -155,20 +155,20 @@ async def create_plan(body: PlanBody):
     p.write_text(json.dumps(data, indent=2))
     return data
 
+class ImportBody(BaseModel):
+    name: str
+    steps: list
+    created_at: Optional[str] = None
+
 @app.post("/api/plans/import")
-async def import_plan(file: UploadFile):
-    raw = await file.read()
-    try:
-        data = json.loads(raw)
-        assert "name" in data and "steps" in data
-    except Exception:
-        raise HTTPException(400, "Invalid plan JSON")
-    p = _plan_path(data["name"])
-    if "created_at" not in data:
+async def import_plan(body: ImportBody):
+    data = body.model_dump()
+    if not data["created_at"]:
         data["created_at"] = datetime.now().isoformat(timespec="seconds")
     data["steps"] = [_coerce_step_floats(s) for s in data["steps"]]
-    p.write_text(json.dumps(data, indent=2))
-    return data
+    _plan_path(data["name"]).write_text(json.dumps(data, indent=2))
+    await _broadcast(f"[PLAN_IMPORTED] {data['name']}\n")
+    return {"ok": True, "name": data["name"]}
 
 @app.get("/api/plans/{name}")
 async def get_plan(name: str):

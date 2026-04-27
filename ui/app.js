@@ -94,6 +94,8 @@ function app() {
             this.loadPlans();
             this.running = false;
             this.activePlan = null;
+          } else if (l.includes("[PLAN_IMPORTED]")) {
+            this.loadPlans();
           } else if (l.includes("[DISCONNECTED]")) {
             this.connected = false;
             this.resetSetup();
@@ -233,9 +235,15 @@ function app() {
     async importPlan(event) {
       const file = event.target.files[0];
       if (!file) return;
-      const fd = new FormData();
-      fd.append("file", file);
-      const r = await fetch("/api/plans/import", { method: "POST", body: fd });
+      let body;
+      try { body = JSON.parse(await file.text()); } catch (_) {
+        this.statusMsg = "Import failed: invalid JSON"; return;
+      }
+      const r = await fetch("/api/plans/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       if (!r.ok) {
         this.statusMsg = "Import failed: " + (await r.json()).detail;
         return;
