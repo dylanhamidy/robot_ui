@@ -31,6 +31,11 @@ function app() {
     modalSteps: [],
     planModalError: "",
 
+    // Hand teach
+    handGuideEnabled: false,
+    handGuideLoading: false,
+    captureType: 'MoveJ',
+
     ws: null,
 
     async init() {
@@ -98,6 +103,8 @@ function app() {
             this.loadPlans();
           } else if (l.includes("[DISCONNECTED]")) {
             this.connected = false;
+            this.handGuideEnabled = false;
+            this.handGuideLoading = false;
             this.resetSetup();
           }
         }
@@ -313,6 +320,52 @@ function app() {
 
     async disconnect() {
       await fetch("/api/robot/disconnect", { method: "POST" });
+    },
+
+    // ── Hand teach ───────────────────────────────────────────────────────────
+
+    async enableHandGuide() {
+      this.handGuideLoading = true;
+      this.termExpanded = true;
+      const r = await fetch("/api/robot/hand_guide/enable", { method: "POST" });
+      if ((await r.json()).ok) this.handGuideEnabled = true;
+      this.handGuideLoading = false;
+    },
+
+    async disableHandGuide() {
+      this.handGuideLoading = true;
+      await fetch("/api/robot/hand_guide/disable", { method: "POST" });
+      this.handGuideEnabled = false;
+      this.handGuideLoading = false;
+    },
+
+    async setMoveType(type) {
+      this.captureType = type;
+      await fetch("/api/robot/hand_guide/type", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ move_type: type }),
+      });
+    },
+
+    async recordPoint() {
+      this.handGuideLoading = true;
+      this.termExpanded = true;
+      await fetch("/api/robot/hand_guide/record", { method: "POST" });
+      this.handGuideLoading = false;
+    },
+
+    async clearCapture() {
+      this.handGuideLoading = true;
+      await fetch("/api/robot/hand_guide/clear", { method: "POST" });
+      this.handGuideLoading = false;
+    },
+
+    async saveCapturedPlan() {
+      this.handGuideLoading = true;
+      this.termExpanded = true;
+      await fetch("/api/robot/hand_guide/save", { method: "POST" });
+      this.handGuideLoading = false;
     },
   };
 }

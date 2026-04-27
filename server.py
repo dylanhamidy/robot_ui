@@ -35,6 +35,7 @@ _active_proc: Optional[subprocess.Popen] = None
 _active_plan: Optional[str] = None
 _build_proc = None  # asyncio.subprocess.Process during colcon build
 _rviz_proc: Optional[subprocess.Popen] = None
+_capture_proc: Optional[subprocess.Popen] = None
 _connected: bool = False
 _stop_requested: bool = False
 _ws_clients: list[WebSocket] = []
@@ -45,8 +46,8 @@ _disconnect_task: Optional[asyncio.Task] = None
 
 def _kill_robot_procs():
     """Kill all robot subprocesses. Synchronous and idempotent — safe to call from atexit."""
-    global _active_proc, _rviz_proc
-    for proc in filter(None, [_active_proc, _rviz_proc]):
+    global _active_proc, _rviz_proc, _capture_proc
+    for proc in filter(None, [_active_proc, _rviz_proc, _capture_proc]):
         if proc.poll() is None:
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGINT)
@@ -209,7 +210,7 @@ class ConnectBody(BaseModel):
 
 @app.post("/api/robot/connect")
 async def robot_connect(body: ConnectBody):
-    global _connected, _rviz_proc
+    global _connected, _rviz_proc, _capture_proc
     pw = body.sudo_password
     iface = body.interface
 
@@ -264,6 +265,15 @@ async def robot_connect(body: ConnectBody):
             preexec_fn=os.setsid
         )
         await _broadcast("[INFO] RViz launching in background\n")
+        _capture_proc = subprocess.Popen(
+            "source /opt/ros/humble/setup.bash && "
+            "source ~/ros2_ws/install/setup.bash && "
+            "ros2 run lux_dsr_control pose_capture_node",
+            shell=True, executable="/bin/bash",
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            preexec_fn=os.setsid
+        )
+        await _broadcast("[INFO] pose_capture_node launched\n")
         _connected = True
         await _broadcast("[CONNECTED]\n")
         return {"ok": True}
@@ -376,7 +386,7 @@ async def robot_stop():
 
 @app.post("/api/robot/disconnect")
 async def robot_disconnect():
-    global _rviz_proc, _connected, _active_proc, _active_plan
+    global _rviz_proc, _capture_proc, _connected, _active_proc, _active_plan
     # Stop any running plan first
     if _active_proc and _active_proc.poll() is None:
         try:
@@ -384,13 +394,14 @@ async def robot_disconnect():
         except ProcessLookupError:
             pass
 
-    # Kill RViz process gorup
-    if _rviz_proc and _rviz_proc.poll() is None:
-        try:
-            os.killpg(os.getpgid(_rviz_proc.pid), signal.SIGINT)
-        except ProcessLookupError:
-            pass
+    for proc in filter(None, [_rviz_proc, _capture_proc]):
+        if proc.poll() is None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+            except ProcessLookupError:
+                pass
     _rviz_proc = None
+    _capture_proc = None
     _connected = False
     await _broadcast("[DISCONNECTED]\n")
     return {"ok": True}
@@ -400,6 +411,62 @@ async def robot_status():
     proc_running = _active_proc is not None and _active_proc.poll() is None
     running = proc_running or _active_plan is not None
     return {"connected": _connected, "running": running, "active_plan": _active_plan}
+
+# ── hand-teach ─────────────────────────────────────────────────────────────
+
+ROS_ENV = (
+    "source /opt/ros/humble/setup.bash && "
+    "source ~/ros2_ws/install/setup.bash && "
+)
+
+async def _ros_call(cmd: str) -> bool:
+    proc = await asyncio.create_subprocess_shell(
+        ROS_ENV + cmd,
+        executable="/bin/bash",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    async for chunk in proc.stdout:
+        await _broadcast(chunk.decode(errors="replace"))
+    return (await proc.wait()) == 0
+
+SRV_TRIGGER = "std_srvs/srv/Trigger {}"
+CAPTURE_NODE = "/pose_capture_client"
+
+@app.post("/api/robot/hand_guide/enable")
+async def hand_guide_enable():
+    ok = await _ros_call(f"ros2 service call {CAPTURE_NODE}/enable_hand_guide {SRV_TRIGGER}")
+    return {"ok": ok}
+
+@app.post("/api/robot/hand_guide/disable")
+async def hand_guide_disable():
+    ok = await _ros_call(f"ros2 service call {CAPTURE_NODE}/disable_hand_guide {SRV_TRIGGER}")
+    return {"ok": ok}
+
+@app.post("/api/robot/hand_guide/record")
+async def hand_guide_record():
+    ok = await _ros_call(f"ros2 service call {CAPTURE_NODE}/record_point {SRV_TRIGGER}")
+    return {"ok": ok}
+
+@app.post("/api/robot/hand_guide/clear")
+async def hand_guide_clear():
+    ok = await _ros_call(f"ros2 service call {CAPTURE_NODE}/clear_plan {SRV_TRIGGER}")
+    return {"ok": ok}
+
+@app.post("/api/robot/hand_guide/save")
+async def hand_guide_save():
+    ok = await _ros_call(f"ros2 service call {CAPTURE_NODE}/save_plan {SRV_TRIGGER}")
+    return {"ok": ok}
+
+class HandGuideTypeBody(BaseModel):
+    move_type: str
+
+@app.post("/api/robot/hand_guide/type")
+async def hand_guide_type(body: HandGuideTypeBody):
+    if body.move_type not in ("MoveJ", "MoveL"):
+        raise HTTPException(400, "move_type must be MoveJ or MoveL")
+    ok = await _ros_call(f"ros2 param set {CAPTURE_NODE} current_type {body.move_type}")
+    return {"ok": ok}
 
 # ── WebSocket ──────────────────────────────────────────────────────────────
 

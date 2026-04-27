@@ -235,6 +235,58 @@
           <input type="file" accept=".json" class="hidden" @change="importPlan($event)" />
         </label>
       </div>
+
+      <!-- Hand Teach — only when connected -->
+      <div x-show="connected" x-cloak class="border-t border-chrome p-2 space-y-1.5">
+        <div class="text-[10px] font-semibold uppercase tracking-widest text-dim px-1 pt-0.5 pb-1">Hand Teach</div>
+
+        <!-- Enable / Disable -->
+        <button x-show="!handGuideEnabled" @click="enableHandGuide()" :disabled="handGuideLoading"
+                class="focus-ring w-full py-2 text-xs font-medium rounded-md border transition-colors duration-150"
+                :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-btn text-gray-400 border-chrome-input' : 'bg-btn hover:bg-btn text-gray-700 border-chrome-input'">
+          Enable Hand Guide
+        </button>
+        <button x-show="handGuideEnabled" @click="disableHandGuide()" :disabled="handGuideLoading"
+                class="focus-ring w-full py-2 text-xs font-medium rounded-md border transition-colors duration-150"
+                :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-amber-50 text-amber-400 border-amber-200' : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'">
+          Disable Hand Guide
+        </button>
+
+        <!-- MoveJ / MoveL toggle -->
+        <div x-show="handGuideEnabled" class="flex rounded-md overflow-hidden border border-chrome-input">
+          <button @click="setMoveType('MoveJ')"
+                  class="focus-ring flex-1 py-1.5 text-xs font-medium transition-colors duration-150"
+                  :class="captureType === 'MoveJ' ? 'bg-accent-ui text-white' : 'bg-btn text-gray-700 hover:bg-btn'">
+            MoveJ
+          </button>
+          <button @click="setMoveType('MoveL')"
+                  class="focus-ring flex-1 py-1.5 text-xs font-medium transition-colors duration-150"
+                  :class="captureType === 'MoveL' ? 'bg-accent-ui text-white' : 'bg-btn text-gray-700 hover:bg-btn'">
+            MoveL
+          </button>
+        </div>
+
+        <!-- Record / Clear / Save -->
+        <div x-show="handGuideEnabled" class="space-y-1">
+          <button @click="recordPoint()" :disabled="handGuideLoading"
+                  class="focus-ring w-full py-2 text-xs font-semibold rounded-md transition-colors duration-150"
+                  :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-green-600 text-white' : 'bg-green-600 hover:bg-green-700 text-white'">
+            <span aria-hidden="true">●</span> Record Point
+          </button>
+          <div class="flex gap-1">
+            <button @click="clearCapture()" :disabled="handGuideLoading"
+                    class="focus-ring flex-1 py-1.5 text-xs font-medium rounded-md border border-chrome-input transition-colors duration-150"
+                    :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-btn text-gray-400' : 'bg-btn hover:bg-btn text-gray-700'">
+              Clear
+            </button>
+            <button @click="saveCapturedPlan()" :disabled="handGuideLoading"
+                    class="focus-ring flex-1 py-1.5 text-xs font-medium rounded-md transition-colors duration-150"
+                    :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-accent-ui text-white' : 'bg-accent-ui hover:bg-accent-ui text-white'">
+              Save Plan
+            </button>
+          </div>
+        </div>
+      </div>
     </aside>
 
     <!-- Right: Plan detail -->
