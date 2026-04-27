@@ -31,6 +31,8 @@ function app() {
     modalName: "",
     modalSteps: [],
     planModalError: "",
+    modalDirty: false,
+    showUnsavedWarning: false,
 
     // Hand teach
     handGuideEnabled: false,
@@ -64,7 +66,6 @@ function app() {
           this.setupTermLines.push(l);
           if (this.setupTermLines.length > 500) this.setupTermLines.shift();
 
-          // Parse progress markers emitted by server.py
           if (l.includes("[STEP] Checking robot workspace")) {
             this.setupSteps[0].state = "running";
             this.setupSteps[0].label = "Checking robot workspace...";
@@ -89,10 +90,7 @@ function app() {
             this.setupRunning = false;
           } else if (l.includes("[ERROR]")) {
             for (const s of this.setupSteps) {
-              if (s.state === "running") {
-                s.state = "fail";
-                break;
-              }
+              if (s.state === "running") { s.state = "fail"; break; }
             }
             this.setupDone = true;
             this.setupRunning = false;
@@ -100,6 +98,22 @@ function app() {
             this.loadPlans();
             this.running = false;
             this.activePlan = null;
+          } else if (l.startsWith("[CAPTURE]")) {
+            // Node pushed a recorded point — convert to step and add to unified list
+            try {
+              const pt = JSON.parse(l.slice("[CAPTURE] ".length));
+              const pos = pt.type === 'MoveJ'
+                ? (pt.posj || pt.pos || [0,0,0,0,0,0])
+                : (pt.posx || pt.pos || [0,0,0,0,0,0]);
+              this.modalSteps.push({
+                type: pt.type,
+                pos,
+                vel: Array.isArray(pt.vel) ? pt.vel[0] : (pt.vel ?? 30),
+                acc: Array.isArray(pt.acc) ? pt.acc[0] : (pt.acc ?? 30),
+                time: pt.time ?? 2,
+              });
+              this.modalDirty = true;
+            } catch (_) {}
           } else if (l.includes("[PLAN_IMPORTED]")) {
             this.loadPlans();
           } else if (l.includes("[DISCONNECTED]")) {
@@ -161,14 +175,11 @@ function app() {
       await fetch("/api/robot/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sudo_password: this.setupPass,
-          interface: this.setupIface,
-        }),
+        body: JSON.stringify({ sudo_password: this.setupPass, interface: this.setupIface }),
       });
     },
 
-    // ── Plan actions ─────────────────────────────────────────────────────────
+    // ── Plan modal ───────────────────────────────────────────────────────────
 
     openAddPlan() {
       this.editMode = false;
@@ -176,6 +187,8 @@ function app() {
       this.modalName = "";
       this.modalSteps = [];
       this.planModalError = "";
+      this.modalDirty = false;
+      this.showUnsavedWarning = false;
       this.showPlanModal = true;
     },
 
@@ -184,38 +197,37 @@ function app() {
       this.editMode = true;
       this.planMode = 'manual';
       this.planModalError = "";
+      this.modalDirty = false;
+      this.showUnsavedWarning = false;
       this.modalName = this.selected.name;
-      this.modalSteps = JSON.parse(JSON.stringify(this.selected.steps)).map(
-        (s) => ({
-          type: s.type,
-          pos: [...(s.pos || [0, 0, 0, 0, 0, 0])],
-          vel: Array.isArray(s.vel) ? s.vel[0] : (s.vel ?? 30),
-          acc: Array.isArray(s.acc) ? s.acc[0] : (s.acc ?? 30),
-          time: s.time ?? 2,
-        }),
-      );
+      this.modalSteps = JSON.parse(JSON.stringify(this.selected.steps)).map((s) => ({
+        type: s.type,
+        pos: [...(s.pos || [0, 0, 0, 0, 0, 0])],
+        vel: Array.isArray(s.vel) ? s.vel[0] : (s.vel ?? 30),
+        acc: Array.isArray(s.acc) ? s.acc[0] : (s.acc ?? 30),
+        time: s.time ?? 2,
+      }));
       this.showPlanModal = true;
     },
 
+    switchToHandGuide() {
+      this.planMode = 'handguide';
+    },
+
+    markDirty() {
+      this.modalDirty = true;
+    },
+
     addStep() {
-      this.modalSteps.push({
-        type: "MoveJ",
-        pos: [0, 0, 0, 0, 0, 0],
-        vel: 30,
-        acc: 30,
-        time: 2,
-      });
+      this.modalSteps.push({ type: "MoveJ", pos: [0, 0, 0, 0, 0, 0], vel: 30, acc: 30, time: 2 });
+      this.modalDirty = true;
     },
 
     async savePlan() {
       const steps = this.modalSteps.map((s) => {
         const step = { type: s.type, pos: s.pos.map(Number) };
-        if (s.vel != null)
-          step.vel =
-            s.type === "MoveL" ? [Number(s.vel), Number(s.vel)] : Number(s.vel);
-        if (s.acc != null)
-          step.acc =
-            s.type === "MoveL" ? [Number(s.acc), Number(s.acc)] : Number(s.acc);
+        if (s.vel != null) step.vel = s.type === "MoveL" ? [Number(s.vel), Number(s.vel)] : Number(s.vel);
+        if (s.acc != null) step.acc = s.type === "MoveL" ? [Number(s.acc), Number(s.acc)] : Number(s.acc);
         if (s.time != null) step.time = Number(s.time);
         return step;
       });
@@ -238,8 +250,33 @@ function app() {
         }
       }
       this.planModalError = "";
+      this.modalDirty = false;
+      this.showUnsavedWarning = false;
+      if (this.handGuideEnabled) await this.disableHandGuide();
       this.showPlanModal = false;
       await this.loadPlans();
+    },
+
+    async closePlanModal() {
+      if (this.modalDirty) {
+        this.showUnsavedWarning = true;
+        return;
+      }
+      if (this.handGuideEnabled) await this.disableHandGuide();
+      this.showPlanModal = false;
+      this.showUnsavedWarning = false;
+    },
+
+    async saveAndClose() {
+      await this.savePlan();
+      this.showUnsavedWarning = false;
+    },
+
+    async confirmDiscard() {
+      if (this.handGuideEnabled) this.disableHandGuide();
+      this.modalDirty = false;
+      this.showUnsavedWarning = false;
+      this.showPlanModal = false;
     },
 
     async importPlan(event) {
@@ -264,8 +301,7 @@ function app() {
 
     async confirmDelete() {
       if (!this.selected) return;
-      if (!confirm(`Delete plan "${this.selected.name}" and its stats?`))
-        return;
+      if (!confirm(`Delete plan "${this.selected.name}" and its stats?`)) return;
       await fetch(`/api/plans/${this.selected.name}`, { method: "DELETE" });
       this.selected = null;
       await this.loadPlans();
@@ -352,29 +388,25 @@ function app() {
     },
 
     async recordPoint() {
+      // Auto-name plan if empty
+      if (!this.editMode && this.modalName.trim() === '') {
+        const ts = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-');
+        this.modalName = `capture_${ts}`;
+      }
       this.handGuideLoading = true;
       this.termExpanded = true;
       await fetch("/api/robot/hand_guide/record", { method: "POST" });
       this.handGuideLoading = false;
+      // Step appears via [CAPTURE] WS event → pushed to modalSteps
     },
 
     async clearCapture() {
       this.handGuideLoading = true;
       await fetch("/api/robot/hand_guide/clear", { method: "POST" });
+      this.modalSteps = [];
+      this.modalDirty = false;
+      this.showUnsavedWarning = false;
       this.handGuideLoading = false;
-    },
-
-    async closePlanModal() {
-      if (this.handGuideEnabled) await this.disableHandGuide();
-      this.showPlanModal = false;
-    },
-
-    async saveCapturedPlan() {
-      this.handGuideLoading = true;
-      this.termExpanded = true;
-      await fetch("/api/robot/hand_guide/save", { method: "POST" });
-      this.handGuideLoading = false;
-      this.showPlanModal = false;
     },
   };
 }

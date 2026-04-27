@@ -480,7 +480,7 @@
   <div x-show="showPlanModal" x-cloak
        class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
        role="dialog" aria-modal="true" aria-labelledby="plan-modal-title" x-trap="showPlanModal">
-    <div class="bg-surface-raised rounded-xl w-full max-w-[700px] mx-4 max-h-[85vh] flex flex-col shadow-modal">
+    <div class="bg-surface-raised rounded-xl w-full max-w-[740px] mx-4 max-h-[88vh] flex flex-col shadow-modal">
 
       <!-- Modal header -->
       <div class="flex items-center justify-between px-5 py-4 border-b border-chrome">
@@ -490,51 +490,115 @@
                 class="focus-ring w-7 h-7 flex items-center justify-center rounded-md text-dim hover:text-gray-900 hover:bg-gray-100 transition-colors duration-150 text-base leading-none">&times;</button>
       </div>
 
-      <!-- Mode tabs (only when connected) -->
-      <div x-show="connected" class="px-5 pt-4 pb-0">
-        <div class="flex gap-1 p-1 bg-gray-100 rounded-lg w-fit">
+      <!-- Mode tabs (only when connected) + Plan name — always outside tab bodies -->
+      <div class="px-5 pt-5 space-y-4">
+        <div x-show="connected" class="flex gap-1 p-1 bg-surface-input border border-chrome rounded-lg w-fit">
           <button @click="planMode = 'manual'"
                   class="focus-ring px-4 py-1.5 text-xs font-medium rounded-md transition-all duration-150"
-                  :class="planMode === 'manual' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'">
+                  :class="planMode === 'manual' ? 'bg-surface-raised text-gray-900 shadow-sm' : 'text-dim hover:text-gray-700'">
             Manual Steps
           </button>
-          <button @click="planMode = 'handguide'"
+          <button @click="switchToHandGuide()"
                   class="focus-ring px-4 py-1.5 text-xs font-medium rounded-md transition-all duration-150"
-                  :class="planMode === 'handguide' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'">
+                  :class="planMode === 'handguide' ? 'bg-surface-raised text-gray-900 shadow-sm' : 'text-dim hover:text-gray-700'">
             Hand Guide
           </button>
         </div>
-      </div>
 
-      <!-- Manual mode body -->
-      <div x-show="planMode === 'manual'" class="p-5 flex-1 overflow-y-auto space-y-4">
+        <!-- Plan name — shared across both modes (new plan only) -->
         <div x-show="!editMode">
           <label for="plan-name" class="block text-xs font-medium text-dim mb-1.5">Plan Name</label>
-          <input id="plan-name" x-model="modalName" placeholder="e.g. assembly_run_1"
+          <input id="plan-name" x-model="modalName" @input="markDirty()" placeholder="e.g. assembly_run_1"
                  class="focus-ring w-full bg-surface-input border border-chrome-input rounded-lg px-3 py-2 text-sm font-mono text-gray-900 transition-colors duration-150" />
         </div>
+
+        <!-- Error -->
         <div x-show="planModalError"
              class="rounded-lg px-3 py-2.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200"
              x-text="planModalError"></div>
+      </div>
+
+      <!-- Unified scrollable body -->
+      <div class="flex-1 overflow-y-auto px-5 pb-5 pt-4 space-y-4">
+
+        <!-- Hand guide controls (only in hand guide mode) -->
+        <div x-show="planMode === 'handguide'"
+             class="rounded-lg border border-chrome bg-surface-input p-4 space-y-4">
+          <p class="text-xs text-dim leading-relaxed">Guide arm to each waypoint, tap <strong class="text-gray-700 font-medium">Record Point</strong>. Switch MoveJ/MoveL per point. Steps appear in the list below.</p>
+
+          <!-- Enable / Disable -->
+          <button x-show="!handGuideEnabled" @click="enableHandGuide()" :disabled="handGuideLoading"
+                  class="focus-ring w-full py-2.5 text-sm font-medium rounded-lg border transition-colors duration-150"
+                  :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-btn text-gray-400 border-chrome-input' : 'bg-surface-raised hover:bg-btn text-gray-700 border-chrome-input'">
+            Enable Hand Guide
+          </button>
+          <button x-show="handGuideEnabled" @click="disableHandGuide()" :disabled="handGuideLoading"
+                  class="focus-ring w-full py-2.5 text-sm font-medium rounded-lg border transition-colors duration-150"
+                  :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-amber-50 text-amber-400 border-amber-200' : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'">
+            Disable Hand Guide
+          </button>
+
+          <!-- Type + Record (only when enabled) -->
+          <div x-show="handGuideEnabled" class="space-y-3">
+            <div class="flex items-center gap-3">
+              <span class="text-[11px] text-dim flex-shrink-0">Move type</span>
+              <div class="flex rounded-lg overflow-hidden border border-chrome-input">
+                <button @click="setMoveType('MoveJ')"
+                        class="focus-ring px-5 py-2 text-xs font-medium transition-colors duration-150"
+                        :class="captureType === 'MoveJ' ? 'bg-accent-ui text-white' : 'bg-surface-raised text-gray-700 hover:bg-btn'">
+                  MoveJ
+                </button>
+                <button @click="setMoveType('MoveL')"
+                        class="focus-ring px-5 py-2 text-xs font-medium transition-colors duration-150"
+                        :class="captureType === 'MoveL' ? 'bg-accent-ui text-white' : 'bg-surface-raised text-gray-700 hover:bg-btn'">
+                  MoveL
+                </button>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <button @click="recordPoint()" :disabled="handGuideLoading"
+                      class="focus-ring flex-1 py-3 text-sm font-semibold rounded-lg transition-colors duration-150"
+                      :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-green-600 text-white' : 'bg-green-600 hover:bg-green-700 text-white'">
+                <span aria-hidden="true" class="mr-1">●</span> Record Point
+              </button>
+              <button @click="clearCapture()" :disabled="handGuideLoading"
+                      class="focus-ring px-4 py-3 text-xs font-medium rounded-lg border border-chrome-input transition-colors duration-150"
+                      :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-surface-raised text-gray-400' : 'bg-surface-raised hover:bg-btn text-gray-700'">
+                Clear
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Unified steps list — visible in both modes -->
         <div>
           <div class="flex items-center justify-between mb-2.5">
-            <span class="text-[10px] font-semibold text-dim uppercase tracking-widest">Steps</span>
-            <button @click="addStep()"
+            <span class="text-[10px] font-semibold text-dim uppercase tracking-widest">
+              Steps
+              <span x-show="modalSteps.length > 0" class="normal-case tracking-normal font-normal ml-1"
+                    x-text="'(' + modalSteps.length + ')'"></span>
+            </span>
+            <button x-show="planMode === 'manual'" @click="addStep()"
                     class="focus-ring text-xs px-2.5 py-1 text-gray-700 bg-btn hover:bg-btn rounded-md border border-chrome-input transition-colors duration-150">
               + Add Step
             </button>
           </div>
+
+          <div x-show="modalSteps.length === 0" class="text-xs text-dim text-center py-6 border border-dashed border-chrome rounded-lg">
+            <span x-text="planMode === 'handguide' ? 'No points recorded yet — enable hand guide and record.' : 'No steps yet — click + Add Step.'"></span>
+          </div>
+
           <div class="space-y-2">
             <template x-for="(step, i) in modalSteps" :key="i">
               <div class="bg-gray-50 border border-chrome rounded-lg p-3">
                 <div class="flex items-center gap-3 mb-2.5">
                   <span class="text-xs text-gray-400 w-4 flex-shrink-0 font-mono" x-text="i + 1"></span>
-                  <select x-model="step.type"
+                  <select x-model="step.type" @change="markDirty()"
                           class="focus-ring bg-surface-input border border-chrome-input rounded-md px-2.5 py-1 text-sm font-mono text-gray-900 transition-colors duration-150">
                     <option>MoveJ</option>
                     <option>MoveL</option>
                   </select>
-                  <button @click="modalSteps.splice(i, 1)"
+                  <button @click="modalSteps.splice(i, 1); markDirty()"
                           class="focus-ring ml-auto text-xs text-red-500 hover:text-red-700 px-2 py-0.5 rounded transition-colors duration-150">
                     Remove
                   </button>
@@ -542,36 +606,30 @@
                 <div class="grid grid-cols-6 gap-1 mb-1">
                   <template x-for="(_, j) in [0,1,2,3,4,5]" :key="j">
                     <input type="number" step="any"
-                           :placeholder="step.type === 'MoveJ'
-                             ? ['J1','J2','J3','J4','J5','J6'][j]
-                             : ['X','Y','Z','A','B','C'][j]"
+                           :placeholder="step.type === 'MoveJ' ? ['J1','J2','J3','J4','J5','J6'][j] : ['X','Y','Z','A','B','C'][j]"
                            :aria-label="step.type === 'MoveJ'
                              ? (['J1','J2','J3','J4','J5','J6'][j] + '°, step ' + (i + 1))
-                             : (j < 3
-                                 ? (['X','Y','Z'][j] + ' mm, step ' + (i + 1))
-                                 : (['A','B','C'][j - 3] + '°, step ' + (i + 1)))"
-                           x-model.number="step.pos[j]"
+                             : (j < 3 ? (['X','Y','Z'][j] + ' mm, step ' + (i + 1)) : (['A','B','C'][j - 3] + '°, step ' + (i + 1)))"
+                           x-model.number="step.pos[j]" @change="markDirty()"
                            class="focus-ring bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 w-full transition-colors duration-150" />
                   </template>
                 </div>
                 <div class="text-[10px] text-dim mb-2"
-                     x-text="step.type === 'MoveJ'
-                       ? 'J1 – J6 (all degrees)'
-                       : 'X, Y, Z (mm) · A, B, C (degrees)'"></div>
+                     x-text="step.type === 'MoveJ' ? 'J1 – J6 (all degrees)' : 'X, Y, Z (mm) · A, B, C (degrees)'"></div>
                 <div class="grid grid-cols-3 gap-2">
                   <div>
                     <label :for="'step-vel-' + i" class="block text-[11px] text-gray-500 mb-1">Vel</label>
-                    <input :id="'step-vel-' + i" type="number" step="any" x-model.number="step.vel"
+                    <input :id="'step-vel-' + i" type="number" step="any" x-model.number="step.vel" @change="markDirty()"
                            class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
                   </div>
                   <div>
                     <label :for="'step-acc-' + i" class="block text-[11px] text-gray-500 mb-1">Acc</label>
-                    <input :id="'step-acc-' + i" type="number" step="any" x-model.number="step.acc"
+                    <input :id="'step-acc-' + i" type="number" step="any" x-model.number="step.acc" @change="markDirty()"
                            class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
                   </div>
                   <div>
                     <label :for="'step-time-' + i" class="block text-[11px] text-gray-500 mb-1">Time (s)</label>
-                    <input :id="'step-time-' + i" type="number" step="any" x-model.number="step.time"
+                    <input :id="'step-time-' + i" type="number" step="any" x-model.number="step.time" @change="markDirty()"
                            class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
                   </div>
                 </div>
@@ -581,76 +639,36 @@
         </div>
       </div>
 
-      <!-- Hand guide mode body -->
-      <div x-show="planMode === 'handguide'" class="p-5 flex-1 flex flex-col gap-4">
-        <p class="text-xs text-dim">Guide the arm to each waypoint and record. Save when done — plan imports automatically.</p>
-
-        <!-- Enable / Disable -->
-        <div>
-          <button x-show="!handGuideEnabled" @click="enableHandGuide()" :disabled="handGuideLoading"
-                  class="focus-ring w-full py-2.5 text-sm font-medium rounded-lg border transition-colors duration-150"
-                  :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-btn text-gray-400 border-chrome-input' : 'bg-btn hover:bg-btn text-gray-700 border-chrome-input'">
-            Enable Hand Guide
-          </button>
-          <button x-show="handGuideEnabled" @click="disableHandGuide()" :disabled="handGuideLoading"
-                  class="focus-ring w-full py-2.5 text-sm font-medium rounded-lg border transition-colors duration-150"
-                  :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-amber-50 text-amber-400 border-amber-200' : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'">
-            Disable Hand Guide
-          </button>
-        </div>
-
-        <!-- MoveJ / MoveL + Record (only when enabled) -->
-        <div x-show="handGuideEnabled" class="space-y-3">
-          <!-- Type toggle -->
-          <div>
-            <p class="text-[11px] text-dim mb-1.5">Move type for next recorded point</p>
-            <div class="flex rounded-lg overflow-hidden border border-chrome-input w-fit">
-              <button @click="setMoveType('MoveJ')"
-                      class="focus-ring px-5 py-2 text-xs font-medium transition-colors duration-150"
-                      :class="captureType === 'MoveJ' ? 'bg-accent-ui text-white' : 'bg-btn text-gray-700 hover:bg-btn'">
-                MoveJ
-              </button>
-              <button @click="setMoveType('MoveL')"
-                      class="focus-ring px-5 py-2 text-xs font-medium transition-colors duration-150"
-                      :class="captureType === 'MoveL' ? 'bg-accent-ui text-white' : 'bg-btn text-gray-700 hover:bg-btn'">
-                MoveL
-              </button>
-            </div>
-          </div>
-
-          <!-- Record -->
-          <button @click="recordPoint()" :disabled="handGuideLoading"
-                  class="focus-ring w-full py-3 text-sm font-semibold rounded-lg transition-colors duration-150"
-                  :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-green-600 text-white' : 'bg-green-600 hover:bg-green-700 text-white'">
-            <span aria-hidden="true">●</span> Record Point
-          </button>
-
-          <!-- Clear + Save -->
-          <div class="flex gap-2 pt-1">
-            <button @click="clearCapture()" :disabled="handGuideLoading"
-                    class="focus-ring flex-1 py-2 text-xs font-medium rounded-lg border border-chrome-input transition-colors duration-150"
-                    :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-btn text-gray-400' : 'bg-btn hover:bg-btn text-gray-700'">
-              Clear Points
-            </button>
-            <button @click="saveCapturedPlan()" :disabled="handGuideLoading"
-                    class="focus-ring flex-1 py-2 text-xs font-semibold rounded-lg transition-colors duration-150"
-                    :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-accent-ui text-white' : 'bg-accent-ui hover:bg-accent-ui text-white'">
-              Save Plan
-            </button>
-          </div>
-        </div>
-      </div>
-
       <!-- Footer -->
-      <div class="px-5 py-4 border-t border-chrome flex justify-end gap-2.5">
-        <button @click="closePlanModal()"
-                class="focus-ring px-4 py-2 text-sm text-gray-700 bg-btn hover:bg-btn rounded-md border border-chrome-input transition-colors duration-150">
-          <span x-text="planMode === 'handguide' ? 'Close' : 'Cancel'"></span>
-        </button>
-        <button x-show="planMode === 'manual'" @click="savePlan()"
-                class="focus-ring px-4 py-2 text-sm text-white bg-accent-ui hover:bg-accent-ui rounded-md font-semibold transition-colors duration-150">
-          Save Plan
-        </button>
+      <div class="px-5 py-4 border-t border-chrome space-y-3">
+        <!-- Unsaved warning -->
+        <div x-show="showUnsavedWarning"
+             class="flex items-center justify-between rounded-lg bg-amber-50 border border-amber-200 px-3 py-2.5">
+          <p class="text-xs text-amber-700 font-medium">Changes not saved — save before closing?</p>
+          <div class="flex gap-2 ml-4 flex-shrink-0">
+            <button @click="confirmDiscard()"
+                    class="focus-ring px-3 py-1.5 text-xs text-gray-600 bg-white hover:bg-gray-50 rounded-md border border-chrome-input transition-colors duration-150">
+              Discard
+            </button>
+            <button @click="saveAndClose()"
+                    class="focus-ring px-3 py-1.5 text-xs font-semibold text-white bg-accent-ui hover:bg-accent-ui rounded-md transition-colors duration-150">
+              Save & Close
+            </button>
+          </div>
+        </div>
+        <!-- Normal actions -->
+        <div class="flex justify-end gap-2.5">
+          <button @click="closePlanModal()"
+                  class="focus-ring px-4 py-2 text-sm text-gray-700 bg-btn hover:bg-btn rounded-md border border-chrome-input transition-colors duration-150">
+            Cancel
+          </button>
+          <button @click="savePlan()"
+                  :disabled="modalSteps.length === 0"
+                  class="focus-ring px-4 py-2 text-sm rounded-md font-semibold transition-colors duration-150"
+                  :class="modalSteps.length === 0 ? 'opacity-50 cursor-not-allowed bg-accent-ui text-white' : 'bg-accent-ui hover:bg-accent-ui text-white'">
+            Save Plan
+          </button>
+        </div>
       </div>
 
     </div>

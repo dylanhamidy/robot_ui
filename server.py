@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -36,6 +36,7 @@ _active_plan: Optional[str] = None
 _build_proc = None  # asyncio.subprocess.Process during colcon build
 _rviz_proc: Optional[subprocess.Popen] = None
 _capture_proc: Optional[subprocess.Popen] = None
+_captured_points: list = []
 _connected: bool = False
 _stop_requested: bool = False
 _ws_clients: list[WebSocket] = []
@@ -402,6 +403,7 @@ async def robot_disconnect():
                 pass
     _rviz_proc = None
     _capture_proc = None
+    _captured_points.clear()
     _connected = False
     await _broadcast("[DISCONNECTED]\n")
     return {"ok": True}
@@ -450,8 +452,23 @@ async def hand_guide_record():
 
 @app.post("/api/robot/hand_guide/clear")
 async def hand_guide_clear():
+    global _captured_points
     ok = await _ros_call(f"ros2 service call {CAPTURE_NODE}/clear_plan {SRV_TRIGGER}")
+    if ok:
+        _captured_points.clear()
     return {"ok": ok}
+
+@app.get("/api/robot/hand_guide/points")
+async def hand_guide_points():
+    return {"points": _captured_points}
+
+@app.post("/api/robot/hand_guide/captured")
+async def hand_guide_captured(request: Request):
+    """Called by pose_capture_node after each record_point to push step data."""
+    point = await request.json()
+    _captured_points.append(point)
+    await _broadcast(f"[CAPTURE] {json.dumps(point)}\n")
+    return {"ok": True, "count": len(_captured_points)}
 
 @app.post("/api/robot/hand_guide/save")
 async def hand_guide_save():
