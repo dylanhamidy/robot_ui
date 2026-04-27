@@ -506,6 +506,15 @@ async def hand_guide_type(body: HandGuideTypeBody):
 async def ws_terminal(ws: WebSocket):
     global _disconnect_task
     await ws.accept()
+    # Purge stale connections before adding new one
+    dead = []
+    for existing in list(_ws_clients):
+        try:
+            await existing.send_text("")
+        except Exception:
+            dead.append(existing)
+    for d in dead:
+        _ws_clients.remove(d)
     _ws_clients.append(ws)
     # Cancel any pending safety-shutdown watchdog — client is back
     if _disconnect_task and not _disconnect_task.done():

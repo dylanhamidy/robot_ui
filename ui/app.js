@@ -261,11 +261,11 @@ function app() {
     },
 
     async closePlanModal() {
+      if (this.handGuideEnabled) await this.disableHandGuide();
       if (this.modalDirty) {
         this.showUnsavedWarning = true;
         return;
       }
-      if (this.handGuideEnabled) await this.disableHandGuide();
       this.showPlanModal = false;
       this.showUnsavedWarning = false;
     },
