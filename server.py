@@ -447,7 +447,16 @@ async def hand_guide_disable():
 
 @app.post("/api/robot/hand_guide/record")
 async def hand_guide_record():
-    ok = await _ros_call(f"ros2 service call {CAPTURE_NODE}/record_point {SRV_TRIGGER}")
+    # Run silently — capture notification arrives via POST /api/robot/hand_guide/captured
+    # Broadcasting ros2 service call stdout causes duplicate [CAPTURE] if node includes
+    # the sentinel in its Trigger response message field.
+    proc = await asyncio.create_subprocess_shell(
+        ROS_ENV + f"ros2 service call {CAPTURE_NODE}/record_point {SRV_TRIGGER}",
+        executable="/bin/bash",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    ok = (await proc.wait()) == 0
     return {"ok": ok}
 
 @app.post("/api/robot/hand_guide/clear")
@@ -461,6 +470,12 @@ async def hand_guide_clear():
 @app.get("/api/robot/hand_guide/points")
 async def hand_guide_points():
     return {"points": _captured_points}
+
+@app.delete("/api/robot/hand_guide/points")
+async def hand_guide_clear_points():
+    global _captured_points
+    _captured_points.clear()
+    return {"ok": True}
 
 @app.post("/api/robot/hand_guide/captured")
 async def hand_guide_captured(request: Request):

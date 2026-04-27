@@ -189,6 +189,7 @@ function app() {
       this.planModalError = "";
       this.modalDirty = false;
       this.showUnsavedWarning = false;
+      fetch("/api/robot/hand_guide/points", { method: "DELETE" });
       this.showPlanModal = true;
     },
 
@@ -199,6 +200,7 @@ function app() {
       this.planModalError = "";
       this.modalDirty = false;
       this.showUnsavedWarning = false;
+      fetch("/api/robot/hand_guide/points", { method: "DELETE" });
       this.modalName = this.selected.name;
       this.modalSteps = JSON.parse(JSON.stringify(this.selected.steps)).map((s) => ({
         type: s.type,
@@ -274,6 +276,7 @@ function app() {
 
     async confirmDiscard() {
       if (this.handGuideEnabled) this.disableHandGuide();
+      fetch("/api/robot/hand_guide/points", { method: "DELETE" });
       this.modalDirty = false;
       this.showUnsavedWarning = false;
       this.showPlanModal = false;
