@@ -55,6 +55,7 @@ function app() {
     },
 
     connectWS() {
+      if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return;
       const proto = location.protocol === "https:" ? "wss" : "ws";
       this.ws = new WebSocket(`${proto}://${location.host}/ws/terminal`);
       this.ws.onmessage = (e) => {
@@ -128,7 +129,7 @@ function app() {
           if (this.$refs.setupTerm) this.$refs.setupTerm.scrollTop = 9999;
         });
       };
-      this.ws.onclose = () => setTimeout(() => this.connectWS(), 2000);
+      this.ws.onclose = () => { this.ws = null; setTimeout(() => this.connectWS(), 2000); };
     },
 
     async loadPlans() {
