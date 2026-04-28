@@ -19,6 +19,7 @@
       }
     }
   </script>
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/focus@3.x.x/dist/cdn.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
@@ -143,6 +144,11 @@
     /* Scrollbar */
     .dark ::-webkit-scrollbar-thumb { background: #454545; }
     .dark ::-webkit-scrollbar-thumb:hover { background: #585858; }
+
+    /* Drag-and-drop */
+    .sortable-ghost { opacity: 0.35; }
+    .drag-handle { cursor: grab; }
+    .drag-handle:active { cursor: grabbing; }
   </style>
 </head>
 <body class="bg-surface-base text-gray-900 h-screen flex flex-col" x-data="app()">
@@ -560,7 +566,8 @@
               <button @click="recordPoint()" :disabled="handGuideLoading"
                       class="focus-ring flex-1 py-3 text-sm font-semibold rounded-lg transition-colors duration-150"
                       :class="handGuideLoading ? 'opacity-50 cursor-not-allowed bg-green-600 text-white' : 'bg-green-600 hover:bg-green-700 text-white'">
-                <span aria-hidden="true" class="mr-1">●</span> Record Point
+                <span aria-hidden="true" class="mr-1">●</span>
+                <span x-text="selectedStepIndex !== null ? 'Update Step ' + (selectedStepIndex + 1) : 'Record Point'"></span>
               </button>
               <button @click="clearCapture()" :disabled="handGuideLoading"
                       class="focus-ring px-4 py-3 text-xs font-medium rounded-lg border border-chrome-input transition-colors duration-150"
@@ -589,17 +596,28 @@
             <span x-text="planMode === 'handguide' ? 'No points recorded yet — enable hand guide and record.' : 'No steps yet — click + Add Step.'"></span>
           </div>
 
-          <div class="space-y-2">
+          <div class="space-y-2" x-ref="stepsContainer">
             <template x-for="(step, i) in modalSteps" :key="i">
-              <div class="bg-gray-50 border border-chrome rounded-lg p-3">
-                <div class="flex items-center gap-3 mb-2.5">
+              <div class="step-row border rounded-lg p-3 transition-colors duration-150"
+                   :class="selectedStepIndex === i && planMode === 'handguide' && handGuideEnabled
+                     ? 'bg-blue-50 border-blue-300 ring-2 ring-blue-400/40'
+                     : 'bg-gray-50 border-chrome'">
+                <div class="flex items-center gap-2 mb-2.5">
+                  <div class="drag-handle flex-shrink-0 text-gray-300 hover:text-gray-500 select-none px-0.5" aria-hidden="true">⠿</div>
                   <span class="text-xs text-gray-400 w-4 flex-shrink-0 font-mono" x-text="i + 1"></span>
-                  <select x-model="step.type" @change="markDirty()"
+                  <select x-model="step.type" @change="onStepTypeChange(i, step)"
                           class="focus-ring bg-surface-input border border-chrome-input rounded-md px-2.5 py-1 text-sm font-mono text-gray-900 transition-colors duration-150">
                     <option>MoveJ</option>
                     <option>MoveL</option>
                   </select>
-                  <button @click="modalSteps.splice(i, 1); markDirty()"
+                  <button x-show="planMode === 'handguide' && handGuideEnabled"
+                          @click="selectStep(i)"
+                          :class="selectedStepIndex === i ? 'text-blue-600 bg-blue-100 border-blue-300' : 'text-gray-500 hover:text-gray-700 bg-btn border-chrome-input'"
+                          :aria-label="selectedStepIndex === i ? 'Deselect step ' + (i + 1) : 'Target step ' + (i + 1) + ' for recording'"
+                          class="focus-ring text-xs px-2 py-0.5 rounded border transition-colors duration-150">
+                    <span x-text="selectedStepIndex === i ? '✓ target' : 'target'"></span>
+                  </button>
+                  <button @click="removeStep(i)"
                           class="focus-ring ml-auto text-xs text-red-500 hover:text-red-700 px-2 py-0.5 rounded transition-colors duration-150">
                     Remove
                   </button>

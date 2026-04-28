@@ -33,6 +33,8 @@ function app() {
     planModalError: "",
     modalDirty: false,
     showUnsavedWarning: false,
+    selectedStepIndex: null,
+    sortableInstance: null,
 
     // Hand teach
     handGuideEnabled: false,
@@ -106,13 +108,19 @@ function app() {
               const pos = pt.type === 'MoveJ'
                 ? (pt.posj || pt.pos || [0,0,0,0,0,0])
                 : (pt.posx || pt.pos || [0,0,0,0,0,0]);
-              this.modalSteps.push({
+              const step = {
                 type: pt.type,
                 pos,
                 vel: Array.isArray(pt.vel) ? pt.vel[0] : (pt.vel ?? 30),
                 acc: Array.isArray(pt.acc) ? pt.acc[0] : (pt.acc ?? 30),
                 time: pt.time ?? 2,
-              });
+              };
+              if (this.selectedStepIndex !== null && this.selectedStepIndex < this.modalSteps.length) {
+                this.modalSteps[this.selectedStepIndex] = step;
+                this.selectedStepIndex = null;
+              } else {
+                this.modalSteps.push(step);
+              }
               this.modalDirty = true;
             } catch (_) {}
           } else if (l.includes("[PLAN_IMPORTED]")) {
@@ -190,8 +198,10 @@ function app() {
       this.planModalError = "";
       this.modalDirty = false;
       this.showUnsavedWarning = false;
+      this.selectedStepIndex = null;
       fetch("/api/robot/hand_guide/points", { method: "DELETE" });
       this.showPlanModal = true;
+      this.$nextTick(() => this.initSortable());
     },
 
     openEditPlan() {
@@ -201,6 +211,7 @@ function app() {
       this.planModalError = "";
       this.modalDirty = false;
       this.showUnsavedWarning = false;
+      this.selectedStepIndex = null;
       fetch("/api/robot/hand_guide/points", { method: "DELETE" });
       this.modalName = this.selected.name;
       this.modalSteps = JSON.parse(JSON.stringify(this.selected.steps)).map((s) => ({
@@ -211,6 +222,7 @@ function app() {
         time: s.time ?? 2,
       }));
       this.showPlanModal = true;
+      this.$nextTick(() => this.initSortable());
     },
 
     switchToHandGuide() {
@@ -224,6 +236,63 @@ function app() {
     addStep() {
       this.modalSteps.push({ type: "MoveJ", pos: [0, 0, 0, 0, 0, 0], vel: 30, acc: 30, time: 2 });
       this.modalDirty = true;
+    },
+
+    removeStep(i) {
+      this.modalSteps.splice(i, 1);
+      if (this.selectedStepIndex === i) {
+        this.selectedStepIndex = null;
+      } else if (this.selectedStepIndex !== null && this.selectedStepIndex > i) {
+        this.selectedStepIndex--;
+      }
+      this.markDirty();
+    },
+
+    onStepTypeChange(i, step) {
+      step.pos = [0, 0, 0, 0, 0, 0];
+      step.vel = 30;
+      step.acc = 30;
+      this.markDirty();
+    },
+
+    selectStep(i) {
+      if (this.selectedStepIndex === i) {
+        this.selectedStepIndex = null;
+        return;
+      }
+      this.selectedStepIndex = i;
+      const step = this.modalSteps[i];
+      if (step && step.type !== this.captureType) {
+        this.setMoveType(step.type);
+      }
+    },
+
+    initSortable() {
+      if (!window.Sortable) return;
+      if (this.sortableInstance) { this.sortableInstance.destroy(); this.sortableInstance = null; }
+      const el = this.$refs.stepsContainer;
+      if (!el) return;
+      this.sortableInstance = Sortable.create(el, {
+        handle: '.drag-handle',
+        draggable: '.step-row',
+        animation: 150,
+        ghostClass: 'sortable-ghost',
+        onEnd: (evt) => {
+          if (evt.oldIndex === evt.newIndex) return;
+          const moved = this.modalSteps.splice(evt.oldIndex, 1)[0];
+          this.modalSteps.splice(evt.newIndex, 0, moved);
+          if (this.selectedStepIndex === evt.oldIndex) {
+            this.selectedStepIndex = evt.newIndex;
+          } else if (this.selectedStepIndex !== null) {
+            if (evt.oldIndex < this.selectedStepIndex && evt.newIndex >= this.selectedStepIndex) {
+              this.selectedStepIndex--;
+            } else if (evt.oldIndex > this.selectedStepIndex && evt.newIndex <= this.selectedStepIndex) {
+              this.selectedStepIndex++;
+            }
+          }
+          this.markDirty();
+        },
+      });
     },
 
     async savePlan() {
@@ -256,6 +325,7 @@ function app() {
       this.modalDirty = false;
       this.showUnsavedWarning = false;
       if (this.handGuideEnabled) await this.disableHandGuide();
+      this.selectedStepIndex = null;
       this.showPlanModal = false;
       await this.loadPlans();
     },
@@ -266,6 +336,7 @@ function app() {
         this.showUnsavedWarning = true;
         return;
       }
+      this.selectedStepIndex = null;
       this.showPlanModal = false;
       this.showUnsavedWarning = false;
     },
@@ -278,6 +349,7 @@ function app() {
     async confirmDiscard() {
       if (this.handGuideEnabled) this.disableHandGuide();
       fetch("/api/robot/hand_guide/points", { method: "DELETE" });
+      this.selectedStepIndex = null;
       this.modalDirty = false;
       this.showUnsavedWarning = false;
       this.showPlanModal = false;
