@@ -1,50 +1,46 @@
-# Luxolis Robot Control
+# Robot Control UI
 
-A web UI for controlling a Doosan robot arm model a0912. Load a plan (a list of joint moves), connect to the robot, run it. You can also teach by hand and record positions directly into a new plan.
+Web UI control panel for a Doosan a0912 robot arm. Load a plan, connect, run. Hand teaching is also supported, such as record positions live and build plans directly from the arm.
 
 ## Prerequisites
 
 - Ubuntu 22.04 (Jammy)
-- ROS 2 Humble Desktop
-- Doosan robot ROS 2 package — see the [doosan-robot-guides](https://github.com/Luxolis-AI/doosan-robot-guides) repo, specifically `DOOSAN_ROBOT_GUIDE.md`, for setup instructions
+- [ROS 2 Humble Desktop](https://docs.ros.org/en/humble/Installation.html)
+- [doosan-robot2](https://github.com/DoosanRobotics/doosan-robot2), official Doosan ROS 2 package
+- Luxolis-specific setup: [doosan-robot-guides](https://github.com/Luxolis-AI/doosan-robot-guides), see `DOOSAN_ROBOT_GUIDE.md`
 
 ## Running
 
 ```bash
-# One-time setup
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-
-# Start
 .venv/bin/python3 server.py
 ```
 
-Open `http://localhost:8000`. Browser needs internet access for CDN scripts (Alpine.js, Tailwind, SortableJS).
+Open `http://localhost:8000`. Needs internet access for CDN scripts.
 
 ## How it works
 
-The backend is one file: `server.py`. FastAPI, a WebSocket endpoint that streams terminal output to the browser, with no database. Plans are JSON files in `plans/`. Run history goes in `stats/`.
-
-The frontend uses Alpine.js and Tailwind, loaded from CDN. No build step.
-
-Starting a plan spawns a `ros2 run lux_dsr_control move_joint_node` subprocess and streams its stdout into the terminal panel. The UI watches that stream for sentinel strings like `[CONNECTED]`, `[DONE]`, and `[ERROR]` to update state. There are no separate polling endpoints.
-
-The robot node lives in a sibling repo (`robot/lux_dsr_control`). This app launches it as a subprocess with `--plan-file <path>`. For live pose capture during hand teaching, the node POSTs back to this server.
+- `server.py` is the whole backend. using FastAPI + WebSocket, no database
+- Plans are JSON files in `plans/`, run history in `stats/`
+- Frontend is Alpine.js + Tailwind via CDN, no build step
+- Running a plan spawns `move_joint_node` as a subprocess and streams its stdout to the terminal panel
+- The UI reads sentinel strings (`[CONNECTED]`, `[DONE]`, `[ERROR]`) from that stream to update state, no polling needed
+- Robot control (movement execution, hand teaching, position capture) goes through `ros2 service call` to the Doosan ROS 2 services running on the robot
 
 ## Hand teaching
 
-Connect to the robot via the UI, open a plan, switch to the Hand Guide tab. Enable hand guide mode, move the arm to a position, press Record. Each recorded point appears in the step list. Steps can be reordered by dragging, and you can select any existing step and re-record it to update just that position.
-
-Switching a step between MoveJ and MoveL resets its position values. The two move types use different coordinate systems (joint angles vs Cartesian), so the old values would be meaningless after a type switch anyway.
+- Open a plan (edit) or add a new plan, inside the steps popup, switch to Hand Guide tab, enable hand guide mode
+- Move the arm to a position and press Record. The point shows up in the step list
+- Steps are draggable to reorder, select a step and press Record to update just that position
+- Switching a step between MoveJ and MoveL resets the position values (joint angles and Cartesian coordinates are not interchangeable)
 
 ## Architecture
 
-**Single-file backend.** `server.py` is one file with no internal modules. The app is small enough that splitting it would add navigation cost without adding clarity.
+**Single-file backend.** `server.py` has no internal modules. The app is small enough that splitting it would just add file-hopping without making anything clearer.
 
-**Sentinel strings instead of polling.** The terminal stream already carries all state transitions. Parsing sentinels from that stream means one WebSocket connection handles both terminal output and UI state. A separate polling loop would just duplicate what the stream already tells us.
+**Sentinel strings, not polling.** The terminal stream already carries every state transition. One WebSocket connection handles both terminal output and UI state. A separate polling loop would be redundant.
 
-**Plans as flat JSON files.** No database. Plans are small, writes are infrequent, and being able to inspect or hand-edit a plan file is genuinely useful.
+**Flat JSON files.** No database. Plans are small, writes are infrequent, and being able to open and edit a plan file directly is useful.
 
-**Alpine.js, no bundler.** The UI is one reactive component. A build pipeline would cost more in setup and maintenance than it saves here.
-
-**Full replace on save.** The modal loads all steps into memory. Save dumps the whole array back. No partial updates, no diffing. Simple enough that it does not need to be smarter.
+**No bundler.** The UI is one Alpine component. A build pipeline would cost more in setup and maintenance than it saves.
