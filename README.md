@@ -39,8 +39,8 @@ Open `http://localhost:8000`. Needs internet access for CDN scripts.
 
 **Single-file backend.** `server.py` has no internal modules. The app is small enough that splitting it would just add file-hopping without making anything clearer.
 
-**Sentinel strings, not polling.** The terminal stream already carries every state transition. One WebSocket connection handles both terminal output and UI state. A separate polling loop would be redundant.
+**Sentinel strings, not polling.** The terminal stream already carries every state transition, so one WebSocket connection handles both terminal output and UI state. Using a separate polling loop would be redundant.
 
-**Flat JSON files.** No database. Plans are small, writes are infrequent, and being able to open and edit a plan file directly is useful.
+**Flat JSON files.** with no database because plans are small, writes are infrequent, and being able to open and edit a plan file directly is useful.
 
 **No bundler.** The UI is one Alpine component. A build pipeline would cost more in setup and maintenance than it saves.
