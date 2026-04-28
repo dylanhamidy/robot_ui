@@ -1,5 +1,6 @@
 {
   "name": "test_plan",
+  "created_at": "2026-04-24T10:00:00",
   "steps": [
     {
       "type": "MoveJ",
@@ -117,6 +118,5 @@
       "acc": 30.0,
       "time": 2.0
     }
-  ],
-  "created_at": "2026-04-24T10:00:00"
+  ]
 }

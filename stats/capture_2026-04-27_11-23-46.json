@@ -1,0 +1,20 @@
+{
+  "total_runs": 3,
+  "success": 3,
+  "fail": 0,
+  "unknown": 0,
+  "history": [
+    {
+      "timestamp": "2026-04-27T20:24:40",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-28T13:46:35",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-28T17:32:07",
+      "result": "success"
+    }
+  ]
+}

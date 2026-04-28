@@ -1,0 +1,112 @@
+{
+  "total_runs": 26,
+  "success": 16,
+  "fail": 10,
+  "unknown": 0,
+  "history": [
+    {
+      "timestamp": "2026-04-23T17:32:36",
+      "result": "fail"
+    },
+    {
+      "timestamp": "2026-04-23T18:57:06",
+      "result": "fail"
+    },
+    {
+      "timestamp": "2026-04-23T18:57:27",
+      "result": "fail"
+    },
+    {
+      "timestamp": "2026-04-23T18:57:35",
+      "result": "fail"
+    },
+    {
+      "timestamp": "2026-04-23T18:57:40",
+      "result": "fail"
+    },
+    {
+      "timestamp": "2026-04-23T19:16:17",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-23T19:23:22",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-24T09:11:02",
+      "result": "fail"
+    },
+    {
+      "timestamp": "2026-04-24T09:49:40",
+      "result": "fail"
+    },
+    {
+      "timestamp": "2026-04-24T10:10:34",
+      "result": "fail"
+    },
+    {
+      "timestamp": "2026-04-24T10:10:41",
+      "result": "fail"
+    },
+    {
+      "timestamp": "2026-04-24T10:10:42",
+      "result": "fail"
+    },
+    {
+      "timestamp": "2026-04-24T10:45:21",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-24T10:53:03",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-24T11:28:52",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-24T11:30:11",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-24T11:46:34",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-24T11:49:53",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-24T15:14:10",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-24T15:14:34",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-24T15:15:16",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-24T15:15:46",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-24T15:16:41",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-27T20:07:51",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-28T15:53:34",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-28T17:34:01",
+      "result": "success"
+    }
+  ]
+}

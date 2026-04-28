@@ -1,0 +1,44 @@
+{
+  "total_runs": 9,
+  "success": 6,
+  "fail": 3,
+  "unknown": 0,
+  "history": [
+    {
+      "timestamp": "2026-04-24T15:24:05",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-24T15:24:15",
+      "result": "fail"
+    },
+    {
+      "timestamp": "2026-04-24T15:24:54",
+      "result": "fail"
+    },
+    {
+      "timestamp": "2026-04-24T16:43:17",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-24T18:24:42",
+      "result": "fail"
+    },
+    {
+      "timestamp": "2026-04-27T13:41:58",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-27T16:56:53",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-27T19:55:37",
+      "result": "success"
+    },
+    {
+      "timestamp": "2026-04-28T17:34:52",
+      "result": "success"
+    }
+  ]
+}
