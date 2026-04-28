@@ -1,5 +1,9 @@
 # Robot Control UI
 
+| Light mode | Dark mode |
+|---|---|
+| ![Light mode](docs/main_light.png) | ![Dark mode](docs/main_dark.png) |
+
 Web UI control panel for a Doosan a0912 robot arm. Load a plan, connect, run. Hand teaching is also supported, such as record positions live and build plans directly from the arm.
 
 ## Prerequisites
