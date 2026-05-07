@@ -455,8 +455,15 @@
         <div>
           <div class="flex items-baseline justify-between mb-3">
             <div class="text-[11px] font-medium text-dim">Speed</div>
-            <div class="text-sm font-mono transition-colors duration-300" :class="ttSpeedColorClass()">
-              <span x-text="ttSpeedDelay"></span><span class="text-xs opacity-60 ml-1">μs delay</span>
+            <div class="flex items-baseline gap-1">
+              <input type="number" min="5" max="5000"
+                     :value="ttSpeedDelay"
+                     @change="ttSetDelayFromInput($event.target.value)"
+                     @keydown.enter="ttSetDelayFromInput($event.target.value); $event.target.blur()"
+                     class="no-spinner w-20 text-right bg-transparent border-0 border-b font-mono text-sm focus:outline-none transition-colors duration-150"
+                     :class="[ttSpeedColorClass(), ttSpeedPct >= 61 ? 'border-current' : 'border-chrome-input focus:border-gray-400']"
+                     aria-label="Speed delay in microseconds" />
+              <span class="text-xs text-dim">μs</span>
             </div>
           </div>
           <input type="range" min="1" max="100" x-model.number="ttSpeedPct" @change="ttSendSpeed()"
@@ -466,9 +473,9 @@
             <span>Fast</span>
           </div>
           <div class="flex gap-1.5">
-            <button @click="ttSetPreset(5)"  class="focus-ring flex-1 py-1.5 text-xs font-medium bg-btn hover:bg-btn text-gray-500 rounded-md border border-chrome-input transition-colors duration-150">Slow</button>
-            <button @click="ttSetPreset(30)" class="focus-ring flex-1 py-1.5 text-xs font-medium bg-btn hover:bg-btn text-gray-600 rounded-md border border-chrome-input transition-colors duration-150">Med</button>
-            <button @click="ttSetPreset(70)" class="focus-ring flex-1 py-1.5 text-xs font-medium bg-btn hover:bg-btn text-gray-700 rounded-md border border-chrome-input transition-colors duration-150">Fast</button>
+            <button @click="ttSetPreset(20)"  class="focus-ring flex-1 py-1.5 text-xs font-medium bg-btn hover:bg-btn text-gray-500 rounded-md border border-chrome-input transition-colors duration-150">Slow</button>
+            <button @click="ttSetPreset(50)" class="focus-ring flex-1 py-1.5 text-xs font-medium bg-btn hover:bg-btn text-gray-600 rounded-md border border-chrome-input transition-colors duration-150">Med</button>
+            <button @click="ttSetPreset(75)" class="focus-ring flex-1 py-1.5 text-xs font-medium bg-btn hover:bg-btn text-gray-700 rounded-md border border-chrome-input transition-colors duration-150">Fast</button>
             <button @click="ttSetPreset(100)" class="focus-ring flex-1 py-1.5 text-xs font-semibold text-orange-700 bg-orange-50 hover:bg-orange-100 rounded-md border border-orange-200 transition-colors duration-150">Max</button>
           </div>
         </div>

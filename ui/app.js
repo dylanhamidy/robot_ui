@@ -20,8 +20,8 @@ function app() {
     ttLoading: false,
     ttError: "",
     get ttSpeedDelay() {
-      // pct 1-100 → delay 5000-3 (inverted: higher pct = faster = lower delay)
-      return Math.max(3, Math.round(5000 - (this.ttSpeedPct / 100) * 4997));
+      // log scale: pct 1→100 maps delay 5000→5 with dense resolution in 5-150μs range
+      return Math.round(5 * Math.pow(1000, 1 - this.ttSpeedPct / 100));
     },
 
     // Setup modal
@@ -509,8 +509,7 @@ function app() {
         this.ttConnected = s.connected;
         this.ttEnabled = s.enabled;
         this.ttDirection = s.direction;
-        const pct = Math.round((1 - (s.speed - 3) / 4997) * 100);
-        this.ttSpeedPct = Math.max(1, Math.min(100, pct));
+        this.ttSpeedPct = this._pctFromDelay(s.speed);
       } catch (_) {}
       setTimeout(() => this.pollTurntableStatus(), 2000);
     },
@@ -578,6 +577,17 @@ function app() {
       if (this.ttSpeedPct >= 86) return 'text-red-600';
       if (this.ttSpeedPct >= 61) return 'text-amber-600';
       return 'text-gray-700';
+    },
+
+    _pctFromDelay(delay) {
+      const clamped = Math.max(5, Math.min(5000, delay));
+      return Math.max(1, Math.min(100, Math.round((1 - Math.log(clamped / 5) / Math.log(1000)) * 100)));
+    },
+
+    async ttSetDelayFromInput(val) {
+      const delay = Math.max(5, Math.min(5000, parseInt(val) || 5));
+      this.ttSpeedPct = this._pctFromDelay(delay);
+      await this.ttSendSpeed();
     },
   };
 }
