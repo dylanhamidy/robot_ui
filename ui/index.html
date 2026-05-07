@@ -163,14 +163,14 @@
 <body class="bg-surface-base text-gray-900 h-screen flex flex-col" x-data="app()">
 
   <!-- Header -->
-  <header class="flex items-center justify-between px-5 py-3 bg-surface-raised shadow-header border-b border-chrome flex-shrink-0 relative z-10">
-    <div class="flex items-center gap-2.5">
+  <header class="flex items-center px-5 py-3 bg-surface-raised shadow-header border-b border-chrome flex-shrink-0 relative z-10">
+    <div class="flex items-center gap-2.5 flex-1">
       <div class="w-7 h-7 bg-accent-ui rounded-lg flex items-center justify-center flex-shrink-0" aria-hidden="true">
         <svg class="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z" />
         </svg>
       </div>
-      <span class="text-[15px] font-semibold tracking-tight text-gray-900">Luxolis Robot Control</span>
+      <span class="text-[15px] font-semibold tracking-tight text-gray-900">Luxolis</span>
       <button @click="toggleDark()"
               class="focus-ring w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-150"
               :aria-label="darkMode ? 'Switch to light mode' : 'Switch to dark mode'">
@@ -182,8 +182,26 @@
         </svg>
       </button>
     </div>
-    <div class="flex items-center gap-3">
-      <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium select-none"
+
+    <!-- Page tabs -->
+    <div class="flex items-center gap-1 p-1 bg-surface-input border border-chrome rounded-lg" role="tablist">
+      <button @click="currentPage = 'robot'"
+              role="tab" :aria-selected="currentPage === 'robot'"
+              class="focus-ring px-4 py-1.5 text-xs font-medium rounded-md transition-all duration-150"
+              :class="currentPage === 'robot' ? 'bg-surface-raised text-gray-900 shadow-sm' : 'text-dim hover:text-gray-700'">
+        Robot Control
+      </button>
+      <button @click="currentPage = 'turntable'"
+              role="tab" :aria-selected="currentPage === 'turntable'"
+              class="focus-ring px-4 py-1.5 text-xs font-medium rounded-md transition-all duration-150"
+              :class="currentPage === 'turntable' ? 'bg-surface-raised text-gray-900 shadow-sm' : 'text-dim hover:text-gray-700'">
+        Turntable Control
+      </button>
+    </div>
+
+    <div class="flex items-center gap-3 flex-1 justify-end">
+      <div x-show="currentPage === 'robot'"
+           class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium select-none"
            :class="connected
              ? 'bg-green-50 text-green-700 ring-1 ring-green-200'
              : 'bg-red-50 text-red-600 ring-1 ring-red-200'">
@@ -192,19 +210,19 @@
               :class="connected ? 'bg-green-500' : 'bg-red-500'"></span>
         <span x-text="connected ? 'Connected' : 'Disconnected'"></span>
       </div>
-      <button x-show="connected" @click="disconnect()"
+      <button x-show="currentPage === 'robot' && connected" @click="disconnect()"
               class="focus-ring px-3 py-1.5 text-xs font-medium bg-red-50 hover:bg-red-100 text-red-600 rounded-md border border-red-200 transition-colors duration-150">
         Disconnect
       </button>
-      <button @click="showSetup = true"
+      <button x-show="currentPage === 'robot'" @click="showSetup = true"
               class="focus-ring px-3 py-1.5 text-xs font-medium bg-btn hover:bg-btn rounded-md border border-chrome-input transition-colors duration-150">
         Setup
       </button>
     </div>
   </header>
 
-  <!-- Main content -->
-  <div class="flex flex-1 overflow-hidden">
+  <!-- Robot page -->
+  <div x-show="currentPage === 'robot'" class="flex flex-1 overflow-hidden">
 
     <!-- Left: Plan list -->
     <aside class="w-64 flex flex-col bg-surface-raised shadow-sidebar flex-shrink-0 relative z-10">
@@ -370,8 +388,104 @@
     </main>
   </div>
 
-  <!-- Footer: Start/Stop -->
-  <footer class="pr-5 py-3 bg-surface-raised shadow-footer flex items-center flex-shrink-0 relative z-10">
+  <!-- Turntable page -->
+  <div x-show="currentPage === 'turntable'" x-cloak class="flex-1 overflow-auto bg-surface-base">
+    <div class="max-w-md mx-auto px-6 py-8">
+
+      <!-- Connection — inline row, no card -->
+      <div class="flex items-end gap-3 pb-6 border-b border-chrome">
+        <div class="flex-1 min-w-0">
+          <label for="tt-port" class="block text-[11px] font-medium text-dim mb-1">Serial port</label>
+          <input id="tt-port" x-model="ttPort" :disabled="ttConnected"
+                 class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-3 py-1.5 text-sm font-mono text-gray-900 transition-colors duration-150" />
+        </div>
+        <div class="flex items-center gap-3 flex-shrink-0">
+          <button x-show="!ttConnected" @click="ttConnect()" :disabled="ttLoading"
+                  class="focus-ring px-4 py-1.5 text-sm font-medium text-white bg-accent-ui hover:bg-accent-ui rounded-md transition-colors duration-150"
+                  :class="ttLoading ? 'opacity-60 cursor-not-allowed' : ''">
+            Connect
+          </button>
+          <button x-show="ttConnected" @click="ttDisconnect()"
+                  class="focus-ring px-4 py-1.5 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-md border border-red-200 transition-colors duration-150">
+            Disconnect
+          </button>
+          <div class="flex items-center gap-1.5 text-xs font-medium select-none"
+               :class="ttConnected ? 'text-green-700' : 'text-gray-400'">
+            <span class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                  :class="ttConnected ? 'bg-green-500' : 'bg-gray-300'" aria-hidden="true"></span>
+            <span x-text="ttConnected ? 'Connected' : 'Not connected'"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="pt-8 space-y-10 transition-opacity duration-200" :class="!ttConnected ? 'opacity-40 pointer-events-none' : ''">
+
+        <!-- Power — dominant centerpiece, no card wrapper -->
+        <button @click="ttEnabled ? ttDisableMotor() : ttEnableMotor()"
+                class="focus-ring w-full h-[6.5rem] rounded-xl text-white transition-all duration-200"
+                :class="ttEnabled
+                  ? 'bg-green-600 hover:bg-green-700 ring-2 ring-green-200'
+                  : 'bg-accent-ui hover:bg-accent-ui'">
+          <div class="flex flex-col items-center gap-1" aria-live="polite">
+            <span class="text-[15px] font-semibold" x-text="ttEnabled ? 'Running' : 'Enable Motor'"></span>
+            <span class="text-xs font-normal opacity-60"
+                  x-text="ttEnabled ? ttDirection + ' · ' + ttSpeedDelay + ' μs' : 'Motor stopped'"></span>
+          </div>
+        </button>
+
+        <!-- Direction — no card, just label + control -->
+        <div>
+          <div class="text-[11px] font-medium text-dim mb-3">Direction</div>
+          <div class="flex rounded-lg overflow-hidden border border-chrome-input w-fit" role="group" aria-label="Rotation direction">
+            <button @click="ttSetDirection('CW')"
+                    class="focus-ring px-10 py-2.5 text-sm font-semibold transition-colors duration-150"
+                    :class="ttDirection === 'CW' ? 'bg-accent-ui text-white' : 'bg-surface-raised text-gray-700 hover:bg-btn'">
+              ↻ CW
+            </button>
+            <button @click="ttSetDirection('CCW')"
+                    class="focus-ring px-10 py-2.5 text-sm font-semibold border-l border-chrome-input transition-colors duration-150"
+                    :class="ttDirection === 'CCW' ? 'bg-accent-ui text-white' : 'bg-surface-raised text-gray-700 hover:bg-btn'">
+              ↺ CCW
+            </button>
+          </div>
+        </div>
+
+        <!-- Speed — no card, just label + controls -->
+        <div>
+          <div class="flex items-baseline justify-between mb-3">
+            <div class="text-[11px] font-medium text-dim">Speed</div>
+            <div class="text-sm font-mono transition-colors duration-300" :class="ttSpeedColorClass()">
+              <span x-text="ttSpeedDelay"></span><span class="text-xs opacity-60 ml-1">μs delay</span>
+            </div>
+          </div>
+          <input type="range" min="1" max="100" x-model.number="ttSpeedPct" @change="ttSendSpeed()"
+                 class="w-full mb-1.5" style="accent-color: var(--btn-primary)" aria-label="Speed" />
+          <div class="flex justify-between text-[10px] text-dim mb-4 select-none px-0.5">
+            <span>Slow</span>
+            <span>Fast</span>
+          </div>
+          <div class="flex gap-1.5">
+            <button @click="ttSetPreset(5)"  class="focus-ring flex-1 py-1.5 text-xs font-medium bg-btn hover:bg-btn text-gray-500 rounded-md border border-chrome-input transition-colors duration-150">Slow</button>
+            <button @click="ttSetPreset(30)" class="focus-ring flex-1 py-1.5 text-xs font-medium bg-btn hover:bg-btn text-gray-600 rounded-md border border-chrome-input transition-colors duration-150">Med</button>
+            <button @click="ttSetPreset(70)" class="focus-ring flex-1 py-1.5 text-xs font-medium bg-btn hover:bg-btn text-gray-700 rounded-md border border-chrome-input transition-colors duration-150">Fast</button>
+            <button @click="ttSetPreset(100)" class="focus-ring flex-1 py-1.5 text-xs font-semibold text-orange-700 bg-orange-50 hover:bg-orange-100 rounded-md border border-orange-200 transition-colors duration-150">Max</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Status / error line -->
+      <div x-show="ttError"
+           class="mt-8 flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
+        <span aria-hidden="true" class="flex-shrink-0">⚠</span>
+        <span x-text="ttError"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer: Start/Stop (robot page only) -->
+  <footer x-show="currentPage === 'robot'" class="pr-5 py-3 bg-surface-raised shadow-footer flex items-center flex-shrink-0 relative z-10">
     <div class="w-64 flex items-center gap-3 px-5 flex-shrink-0">
       <button @click="startPlan()"
               :disabled="!selected || running || !connected"

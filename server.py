@@ -10,6 +10,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+try:
+    import serial
+except ImportError:
+    serial = None
+
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -42,6 +47,12 @@ _stop_requested: bool = False
 _ws_clients: list[WebSocket] = []
 _disconnect_task: Optional[asyncio.Task] = None
 
+# ── turntable state ────────────────────────────────────────────────────────
+_turntable = None  # serial.Serial instance when connected
+_tt_enabled: bool = False
+_tt_direction: str = "CW"
+_tt_speed: int = 50  # microseconds between pulses
+
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
@@ -56,7 +67,20 @@ def _kill_robot_procs():
             except (ProcessLookupError, subprocess.TimeoutExpired, OSError):
                 pass
 
+def _close_turntable():
+    global _turntable, _tt_enabled
+    if _turntable is not None:
+        try:
+            if _turntable.is_open:
+                _turntable.write(b"DISABLE\n")
+                _turntable.close()
+        except Exception:
+            pass
+    _turntable = None
+    _tt_enabled = False
+
 atexit.register(_kill_robot_procs)
+atexit.register(_close_turntable)
 
 async def _schedule_safety_shutdown():
     """Grace-period watchdog: if no browser client reconnects within 8 s, stop the robot."""
@@ -499,6 +523,78 @@ async def hand_guide_type(body: HandGuideTypeBody):
         raise HTTPException(400, "move_type must be MoveJ or MoveL")
     ok = await _ros_call(f"ros2 param set {CAPTURE_NODE} current_type {body.move_type}")
     return {"ok": ok}
+
+# ── turntable control ──────────────────────────────────────────────────────
+
+class TurntableConnectBody(BaseModel):
+    port: str = "/dev/ttyUSB0"
+    baud: int = 9600
+
+@app.post("/api/turntable/connect")
+async def turntable_connect(body: TurntableConnectBody):
+    global _turntable
+    if serial is None:
+        raise HTTPException(500, "pyserial not installed — run: pip install pyserial")
+    _close_turntable()
+    try:
+        _turntable = serial.Serial(body.port, body.baud, timeout=1)
+        return {"ok": True}
+    except Exception as e:
+        _turntable = None
+        raise HTTPException(500, str(e))
+
+@app.post("/api/turntable/disconnect")
+async def turntable_disconnect():
+    _close_turntable()
+    return {"ok": True}
+
+@app.get("/api/turntable/status")
+async def turntable_status():
+    connected = _turntable is not None and _turntable.is_open
+    return {"connected": connected, "enabled": _tt_enabled, "direction": _tt_direction, "speed": _tt_speed}
+
+def _tt_send(cmd: str):
+    if _turntable is None or not _turntable.is_open:
+        raise HTTPException(409, "Turntable not connected")
+    _turntable.write((cmd + "\n").encode())
+
+@app.post("/api/turntable/enable")
+async def turntable_enable():
+    global _tt_enabled
+    _tt_send("ENABLE")
+    _tt_enabled = True
+    return {"ok": True}
+
+@app.post("/api/turntable/disable")
+async def turntable_disable():
+    global _tt_enabled
+    _tt_send("DISABLE")
+    _tt_enabled = False
+    return {"ok": True}
+
+class TurntableDirectionBody(BaseModel):
+    direction: str
+
+@app.post("/api/turntable/direction")
+async def turntable_direction(body: TurntableDirectionBody):
+    global _tt_direction
+    if body.direction not in ("CW", "CCW"):
+        raise HTTPException(400, "direction must be CW or CCW")
+    _tt_send(f"DIR:{body.direction}")
+    _tt_direction = body.direction
+    return {"ok": True}
+
+class TurntableSpeedBody(BaseModel):
+    delay_us: int
+
+@app.post("/api/turntable/speed")
+async def turntable_speed(body: TurntableSpeedBody):
+    global _tt_speed
+    if body.delay_us < 3:
+        raise HTTPException(400, "delay_us must be >= 3")
+    _tt_send(f"SPEED:{body.delay_us}")
+    _tt_speed = body.delay_us
+    return {"ok": True}
 
 # ── WebSocket ──────────────────────────────────────────────────────────────
 

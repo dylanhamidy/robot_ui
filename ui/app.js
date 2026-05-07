@@ -1,5 +1,6 @@
 function app() {
   return {
+    currentPage: 'robot',
     plans: [],
     selected: null,
     connected: false,
@@ -9,6 +10,19 @@ function app() {
     termLines: [],
     termExpanded: false,
     darkMode: localStorage.getItem('darkMode') === 'true',
+
+    // Turntable
+    ttPort: '/dev/ttyUSB0',
+    ttConnected: false,
+    ttEnabled: false,
+    ttDirection: 'CW',
+    ttSpeedPct: 50,
+    ttLoading: false,
+    ttError: "",
+    get ttSpeedDelay() {
+      // pct 1-100 → delay 5000-3 (inverted: higher pct = faster = lower delay)
+      return Math.max(3, Math.round(5000 - (this.ttSpeedPct / 100) * 4997));
+    },
 
     // Setup modal
     showSetup: false,
@@ -47,6 +61,7 @@ function app() {
       document.documentElement.classList.toggle('dark', this.darkMode);
       await this.loadPlans();
       this.pollStatus();
+      this.pollTurntableStatus();
       this.connectWS();
     },
 
@@ -483,6 +498,86 @@ function app() {
       this.modalDirty = false;
       this.showUnsavedWarning = false;
       this.handGuideLoading = false;
+    },
+
+    // ── Turntable ─────────────────────────────────────────────────────────────
+
+    async pollTurntableStatus() {
+      try {
+        const r = await fetch("/api/turntable/status");
+        const s = await r.json();
+        this.ttConnected = s.connected;
+        this.ttEnabled = s.enabled;
+        this.ttDirection = s.direction;
+        const pct = Math.round((1 - (s.speed - 3) / 4997) * 100);
+        this.ttSpeedPct = Math.max(1, Math.min(100, pct));
+      } catch (_) {}
+      setTimeout(() => this.pollTurntableStatus(), 2000);
+    },
+
+    async ttConnect() {
+      this.ttLoading = true;
+      this.ttError = "";
+      try {
+        const r = await fetch("/api/turntable/connect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ port: this.ttPort }),
+        });
+        if (!r.ok) this.ttError = (await r.json()).detail;
+      } catch (e) {
+        this.ttError = "Request failed — is the server running?";
+      }
+      this.ttLoading = false;
+    },
+
+    async ttDisconnect() {
+      this.ttLoading = true;
+      this.ttError = "";
+      await fetch("/api/turntable/disconnect", { method: "POST" });
+      this.ttLoading = false;
+    },
+
+    async ttEnableMotor() {
+      const r = await fetch("/api/turntable/enable", { method: "POST" });
+      if (r.ok) { this.ttEnabled = true; this.ttError = ""; }
+      else this.ttError = (await r.json()).detail;
+    },
+
+    async ttDisableMotor() {
+      const r = await fetch("/api/turntable/disable", { method: "POST" });
+      if (r.ok) { this.ttEnabled = false; this.ttError = ""; }
+      else this.ttError = (await r.json()).detail;
+    },
+
+    async ttSetDirection(dir) {
+      this.ttDirection = dir;
+      const r = await fetch("/api/turntable/direction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ direction: dir }),
+      });
+      if (!r.ok) this.ttError = (await r.json()).detail;
+    },
+
+    async ttSendSpeed() {
+      const r = await fetch("/api/turntable/speed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ delay_us: this.ttSpeedDelay }),
+      });
+      if (!r.ok) this.ttError = (await r.json()).detail;
+    },
+
+    async ttSetPreset(pct) {
+      this.ttSpeedPct = pct;
+      await this.ttSendSpeed();
+    },
+
+    ttSpeedColorClass() {
+      if (this.ttSpeedPct >= 86) return 'text-red-600';
+      if (this.ttSpeedPct >= 61) return 'text-amber-600';
+      return 'text-gray-700';
     },
   };
 }
