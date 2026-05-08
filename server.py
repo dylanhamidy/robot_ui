@@ -585,6 +585,7 @@ async def turntable_connect(body: TurntableConnectBody):
     _close_turntable()
     try:
         _turntable = serial.Serial(body.port, body.baud, timeout=1)
+        asyncio.create_task(_tt_sync_state())
         return {"ok": True}
     except Exception as e:
         _turntable = None
@@ -628,6 +629,7 @@ async def turntable_confirm(body: TurntableConfirmBody):
     try:
         _turntable = serial.Serial(body.port, 9600, timeout=1)
         _tt_pending_port = None
+        asyncio.create_task(_tt_sync_state())
         return {"ok": True}
     except Exception as e:
         _turntable = None
@@ -646,6 +648,7 @@ async def turntable_confirm(body: TurntableConfirmBody):
         try:
             _turntable = serial.Serial(body.port, 9600, timeout=1)
             _tt_pending_port = None
+            asyncio.create_task(_tt_sync_state())
             return {"ok": True}
         except Exception as e2:
             _turntable = None
@@ -666,6 +669,12 @@ def _tt_send(cmd: str):
     if _turntable is None or not _turntable.is_open:
         raise HTTPException(409, "Turntable not connected")
     _turntable.write((cmd + "\n").encode())
+
+async def _tt_sync_state():
+    # Arduino resets on DTR (serial open) — wait for boot then push current state
+    await asyncio.sleep(1.5)
+    _tt_send(f"DIR:{_tt_direction}")
+    _tt_send(f"SPEED:{_tt_speed}")
 
 @app.post("/api/turntable/enable")
 async def turntable_enable():
