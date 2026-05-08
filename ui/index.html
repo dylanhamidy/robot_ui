@@ -420,7 +420,7 @@
         </div>
         <!-- Skipped ports — click to populate port input -->
         <div x-show="ttRejectedPorts.length > 0" class="mt-2.5">
-          <div class="text-[10px] font-medium text-dim mb-1.5">Skipped ports</div>
+          <div class="text-[11px] font-medium text-dim mb-1.5">Skipped ports</div>
           <div class="flex flex-wrap gap-1.5">
             <template x-for="p in ttRejectedPorts" :key="p">
               <button @click="ttSelectRejected(p)"
@@ -855,9 +855,9 @@
 
         <!-- sudo password — appears only after permission error -->
         <div x-show="ttNeedsSudo" class="space-y-3">
-          <div class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+          <div class="text-xs text-gray-600 bg-surface-input border border-chrome rounded-lg px-3 py-2.5">
             Permission denied. Enter sudo password, or add user to dialout group:
-            <code class="block mt-1.5 font-mono text-[11px] select-all">sudo usermod -aG dialout $USER</code>
+            <code class="block mt-1.5 font-mono text-[11px] text-gray-800 select-all">sudo usermod -aG dialout $USER</code>
           </div>
           <div>
             <label for="tt-sudo-pass" class="block text-xs font-medium text-dim mb-1">Sudo password</label>
