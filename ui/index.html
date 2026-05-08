@@ -473,8 +473,7 @@
                      :value="ttSpeedDelay"
                      @change="ttSetDelayFromInput($event.target.value)"
                      @keydown.enter="ttSetDelayFromInput($event.target.value); $event.target.blur()"
-                     class="no-spinner w-20 text-right bg-transparent border-0 border-b font-mono text-sm focus:outline-none transition-colors duration-150"
-                     :class="[ttSpeedColorClass(), ttSpeedPct >= 61 ? 'border-current' : 'border-chrome-input focus:border-gray-400']"
+                     class="no-spinner w-20 text-right bg-transparent border-0 border-b border-chrome-input font-mono text-sm text-gray-700 focus:outline-none focus:border-gray-400 transition-colors duration-150"
                      aria-label="Speed delay in microseconds" />
               <span class="text-xs text-dim">μs</span>
             </div>

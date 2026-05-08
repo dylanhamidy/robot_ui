@@ -656,12 +656,6 @@ function app() {
       await this.ttSendSpeed();
     },
 
-    ttSpeedColorClass() {
-      if (this.ttSpeedPct >= 86) return "text-red-600";
-      if (this.ttSpeedPct >= 61) return "text-amber-600";
-      return "text-gray-700";
-    },
-
     _pctFromDelay(delay) {
       const clamped = Math.max(5, Math.min(5000, delay));
       return Math.max(
