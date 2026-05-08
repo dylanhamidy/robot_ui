@@ -1,6 +1,6 @@
 function app() {
   return {
-    currentPage: 'robot',
+    currentPage: "robot",
     plans: [],
     selected: null,
     connected: false,
@@ -9,16 +9,23 @@ function app() {
     statusMsg: "",
     termLines: [],
     termExpanded: false,
-    darkMode: localStorage.getItem('darkMode') === 'true',
+    darkMode: localStorage.getItem("darkMode") === "true",
 
     // Turntable
-    ttPort: '/dev/ttyUSB0',
+    ttPort: "/dev/ttyACM0",
     ttConnected: false,
     ttEnabled: false,
-    ttDirection: 'CW',
+    ttDirection: "CW",
     ttSpeedPct: 50,
     ttLoading: false,
     ttError: "",
+    ttPendingPort: null,
+    ttRejectedPorts: [],
+    showTtDetectModal: false,
+    ttSudoPass: "",
+    ttDetectLoading: false,
+    ttDetectError: "",
+    ttNeedsSudo: false,
     get ttSpeedDelay() {
       // log scale: pct 1→100 maps delay 5000→5 with dense resolution in 5-150μs range
       return Math.round(5 * Math.pow(1000, 1 - this.ttSpeedPct / 100));
@@ -41,7 +48,7 @@ function app() {
     // Plan modal
     showPlanModal: false,
     editMode: false,
-    planMode: 'manual',
+    planMode: "manual",
     modalName: "",
     modalSteps: [],
     planModalError: "",
@@ -53,12 +60,12 @@ function app() {
     // Hand teach
     handGuideEnabled: false,
     handGuideLoading: false,
-    captureType: 'MoveJ',
+    captureType: "MoveJ",
 
     ws: null,
 
     async init() {
-      document.documentElement.classList.toggle('dark', this.darkMode);
+      document.documentElement.classList.toggle("dark", this.darkMode);
       await this.loadPlans();
       this.pollStatus();
       this.pollTurntableStatus();
@@ -67,12 +74,17 @@ function app() {
 
     toggleDark() {
       this.darkMode = !this.darkMode;
-      localStorage.setItem('darkMode', this.darkMode);
-      document.documentElement.classList.toggle('dark', this.darkMode);
+      localStorage.setItem("darkMode", this.darkMode);
+      document.documentElement.classList.toggle("dark", this.darkMode);
     },
 
     connectWS() {
-      if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return;
+      if (
+        this.ws &&
+        (this.ws.readyState === WebSocket.OPEN ||
+          this.ws.readyState === WebSocket.CONNECTING)
+      )
+        return;
       const proto = location.protocol === "https:" ? "wss" : "ws";
       this.ws = new WebSocket(`${proto}://${location.host}/ws/terminal`);
       this.ws.onmessage = (e) => {
@@ -108,7 +120,10 @@ function app() {
             this.setupRunning = false;
           } else if (l.includes("[ERROR]")) {
             for (const s of this.setupSteps) {
-              if (s.state === "running") { s.state = "fail"; break; }
+              if (s.state === "running") {
+                s.state = "fail";
+                break;
+              }
             }
             this.setupDone = true;
             this.setupRunning = false;
@@ -120,9 +135,10 @@ function app() {
             // Node pushed a recorded point — convert to step and add to unified list
             try {
               const pt = JSON.parse(l.slice("[CAPTURE] ".length));
-              const pos = pt.type === 'MoveJ'
-                ? (pt.posj || pt.pos || [0,0,0,0,0,0])
-                : (pt.posx || pt.pos || [0,0,0,0,0,0]);
+              const pos =
+                pt.type === "MoveJ"
+                  ? pt.posj || pt.pos || [0, 0, 0, 0, 0, 0]
+                  : pt.posx || pt.pos || [0, 0, 0, 0, 0, 0];
               const step = {
                 type: pt.type,
                 pos,
@@ -130,7 +146,10 @@ function app() {
                 acc: Array.isArray(pt.acc) ? pt.acc[0] : (pt.acc ?? 30),
                 time: pt.time ?? 2,
               };
-              if (this.selectedStepIndex !== null && this.selectedStepIndex < this.modalSteps.length) {
+              if (
+                this.selectedStepIndex !== null &&
+                this.selectedStepIndex < this.modalSteps.length
+              ) {
                 this.modalSteps[this.selectedStepIndex] = step;
                 this.selectedStepIndex = null;
               } else {
@@ -152,7 +171,10 @@ function app() {
           if (this.$refs.setupTerm) this.$refs.setupTerm.scrollTop = 9999;
         });
       };
-      this.ws.onclose = () => { this.ws = null; setTimeout(() => this.connectWS(), 2000); };
+      this.ws.onclose = () => {
+        this.ws = null;
+        setTimeout(() => this.connectWS(), 2000);
+      };
     },
 
     async loadPlans() {
@@ -199,7 +221,10 @@ function app() {
       await fetch("/api/robot/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sudo_password: this.setupPass, interface: this.setupIface }),
+        body: JSON.stringify({
+          sudo_password: this.setupPass,
+          interface: this.setupIface,
+        }),
       });
     },
 
@@ -207,7 +232,7 @@ function app() {
 
     openAddPlan() {
       this.editMode = false;
-      this.planMode = 'manual';
+      this.planMode = "manual";
       this.modalName = "";
       this.modalSteps = [];
       this.planModalError = "";
@@ -222,26 +247,28 @@ function app() {
     openEditPlan() {
       if (!this.selected) return;
       this.editMode = true;
-      this.planMode = 'manual';
+      this.planMode = "manual";
       this.planModalError = "";
       this.modalDirty = false;
       this.showUnsavedWarning = false;
       this.selectedStepIndex = null;
       fetch("/api/robot/hand_guide/points", { method: "DELETE" });
       this.modalName = this.selected.name;
-      this.modalSteps = JSON.parse(JSON.stringify(this.selected.steps)).map((s) => ({
-        type: s.type,
-        pos: [...(s.pos || [0, 0, 0, 0, 0, 0])],
-        vel: Array.isArray(s.vel) ? s.vel[0] : (s.vel ?? 30),
-        acc: Array.isArray(s.acc) ? s.acc[0] : (s.acc ?? 30),
-        time: s.time ?? 2,
-      }));
+      this.modalSteps = JSON.parse(JSON.stringify(this.selected.steps)).map(
+        (s) => ({
+          type: s.type,
+          pos: [...(s.pos || [0, 0, 0, 0, 0, 0])],
+          vel: Array.isArray(s.vel) ? s.vel[0] : (s.vel ?? 30),
+          acc: Array.isArray(s.acc) ? s.acc[0] : (s.acc ?? 30),
+          time: s.time ?? 2,
+        }),
+      );
       this.showPlanModal = true;
       this.$nextTick(() => this.initSortable());
     },
 
     switchToHandGuide() {
-      this.planMode = 'handguide';
+      this.planMode = "handguide";
     },
 
     markDirty() {
@@ -249,7 +276,13 @@ function app() {
     },
 
     addStep() {
-      this.modalSteps.push({ type: "MoveJ", pos: [0, 0, 0, 0, 0, 0], vel: 30, acc: 30, time: 2 });
+      this.modalSteps.push({
+        type: "MoveJ",
+        pos: [0, 0, 0, 0, 0, 0],
+        vel: 30,
+        acc: 30,
+        time: 2,
+      });
       this.modalDirty = true;
     },
 
@@ -257,7 +290,10 @@ function app() {
       this.modalSteps.splice(i, 1);
       if (this.selectedStepIndex === i) {
         this.selectedStepIndex = null;
-      } else if (this.selectedStepIndex !== null && this.selectedStepIndex > i) {
+      } else if (
+        this.selectedStepIndex !== null &&
+        this.selectedStepIndex > i
+      ) {
         this.selectedStepIndex--;
       }
       this.markDirty();
@@ -284,14 +320,17 @@ function app() {
 
     initSortable() {
       if (!window.Sortable) return;
-      if (this.sortableInstance) { this.sortableInstance.destroy(); this.sortableInstance = null; }
+      if (this.sortableInstance) {
+        this.sortableInstance.destroy();
+        this.sortableInstance = null;
+      }
       const el = this.$refs.stepsContainer;
       if (!el) return;
       this.sortableInstance = Sortable.create(el, {
-        handle: '.drag-handle',
-        draggable: '.step-row',
+        handle: ".drag-handle",
+        draggable: ".step-row",
         animation: 150,
-        ghostClass: 'sortable-ghost',
+        ghostClass: "sortable-ghost",
         onEnd: (evt) => {
           if (evt.oldIndex === evt.newIndex) return;
           const moved = this.modalSteps.splice(evt.oldIndex, 1)[0];
@@ -299,9 +338,15 @@ function app() {
           if (this.selectedStepIndex === evt.oldIndex) {
             this.selectedStepIndex = evt.newIndex;
           } else if (this.selectedStepIndex !== null) {
-            if (evt.oldIndex < this.selectedStepIndex && evt.newIndex >= this.selectedStepIndex) {
+            if (
+              evt.oldIndex < this.selectedStepIndex &&
+              evt.newIndex >= this.selectedStepIndex
+            ) {
               this.selectedStepIndex--;
-            } else if (evt.oldIndex > this.selectedStepIndex && evt.newIndex <= this.selectedStepIndex) {
+            } else if (
+              evt.oldIndex > this.selectedStepIndex &&
+              evt.newIndex <= this.selectedStepIndex
+            ) {
               this.selectedStepIndex++;
             }
           }
@@ -313,8 +358,12 @@ function app() {
     async savePlan() {
       const steps = this.modalSteps.map((s) => {
         const step = { type: s.type, pos: s.pos.map(Number) };
-        if (s.vel != null) step.vel = s.type === "MoveL" ? [Number(s.vel), Number(s.vel)] : Number(s.vel);
-        if (s.acc != null) step.acc = s.type === "MoveL" ? [Number(s.acc), Number(s.acc)] : Number(s.acc);
+        if (s.vel != null)
+          step.vel =
+            s.type === "MoveL" ? [Number(s.vel), Number(s.vel)] : Number(s.vel);
+        if (s.acc != null)
+          step.acc =
+            s.type === "MoveL" ? [Number(s.acc), Number(s.acc)] : Number(s.acc);
         if (s.time != null) step.time = Number(s.time);
         return step;
       });
@@ -374,8 +423,11 @@ function app() {
       const file = event.target.files[0];
       if (!file) return;
       let body;
-      try { body = JSON.parse(await file.text()); } catch (_) {
-        this.statusMsg = "Import failed: invalid JSON"; return;
+      try {
+        body = JSON.parse(await file.text());
+      } catch (_) {
+        this.statusMsg = "Import failed: invalid JSON";
+        return;
       }
       const r = await fetch("/api/plans/import", {
         method: "POST",
@@ -392,23 +444,26 @@ function app() {
 
     async confirmDelete() {
       if (!this.selected) return;
-      if (!confirm(`Delete plan "${this.selected.name}" and its stats?`)) return;
+      if (!confirm(`Delete plan "${this.selected.name}" and its stats?`))
+        return;
       await fetch(`/api/plans/${this.selected.name}`, { method: "DELETE" });
       this.selected = null;
       await this.loadPlans();
     },
 
     classifyLine(l) {
-      if (l.includes("[CONNECTED]") || l.includes("[DONE]")) return "sentinel-success";
-      if (l.includes("[ERROR]") || l.includes("[DISCONNECTED]")) return "sentinel-error";
+      if (l.includes("[CONNECTED]") || l.includes("[DONE]"))
+        return "sentinel-success";
+      if (l.includes("[ERROR]") || l.includes("[DISCONNECTED]"))
+        return "sentinel-error";
       if (l.startsWith("[STEP]")) return "step";
       return "stat";
     },
 
     termLineClass(type) {
       if (type === "sentinel-success") return "text-green-700 font-semibold";
-      if (type === "sentinel-error")   return "text-red-600 font-semibold";
-      if (type === "step")             return "text-green-500";
+      if (type === "sentinel-error") return "text-red-600 font-semibold";
+      if (type === "step") return "text-green-500";
       return "text-gray-400";
     },
 
@@ -480,8 +535,12 @@ function app() {
 
     async recordPoint() {
       // Auto-name plan if empty
-      if (!this.editMode && this.modalName.trim() === '') {
-        const ts = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-');
+      if (!this.editMode && this.modalName.trim() === "") {
+        const ts = new Date()
+          .toISOString()
+          .slice(0, 19)
+          .replace("T", "_")
+          .replace(/:/g, "-");
         this.modalName = `capture_${ts}`;
       }
       this.handGuideLoading = true;
@@ -510,6 +569,18 @@ function app() {
         this.ttEnabled = s.enabled;
         this.ttDirection = s.direction;
         this.ttSpeedPct = this._pctFromDelay(s.speed);
+        this.ttRejectedPorts = s.rejected_ports || [];
+        if (s.pending_port && !this.showTtDetectModal) {
+          this.ttPendingPort = s.pending_port;
+          this.ttSudoPass = "";
+          this.ttDetectError = "";
+          this.ttNeedsSudo = false;
+          this.showTtDetectModal = true;
+        }
+        if (!s.pending_port && this.showTtDetectModal && !this.ttDetectLoading) {
+          this.showTtDetectModal = false;
+          this.ttPendingPort = null;
+        }
       } catch (_) {}
       setTimeout(() => this.pollTurntableStatus(), 2000);
     },
@@ -539,14 +610,18 @@ function app() {
 
     async ttEnableMotor() {
       const r = await fetch("/api/turntable/enable", { method: "POST" });
-      if (r.ok) { this.ttEnabled = true; this.ttError = ""; }
-      else this.ttError = (await r.json()).detail;
+      if (r.ok) {
+        this.ttEnabled = true;
+        this.ttError = "";
+      } else this.ttError = (await r.json()).detail;
     },
 
     async ttDisableMotor() {
       const r = await fetch("/api/turntable/disable", { method: "POST" });
-      if (r.ok) { this.ttEnabled = false; this.ttError = ""; }
-      else this.ttError = (await r.json()).detail;
+      if (r.ok) {
+        this.ttEnabled = false;
+        this.ttError = "";
+      } else this.ttError = (await r.json()).detail;
     },
 
     async ttSetDirection(dir) {
@@ -574,20 +649,70 @@ function app() {
     },
 
     ttSpeedColorClass() {
-      if (this.ttSpeedPct >= 86) return 'text-red-600';
-      if (this.ttSpeedPct >= 61) return 'text-amber-600';
-      return 'text-gray-700';
+      if (this.ttSpeedPct >= 86) return "text-red-600";
+      if (this.ttSpeedPct >= 61) return "text-amber-600";
+      return "text-gray-700";
     },
 
     _pctFromDelay(delay) {
       const clamped = Math.max(5, Math.min(5000, delay));
-      return Math.max(1, Math.min(100, Math.round((1 - Math.log(clamped / 5) / Math.log(1000)) * 100)));
+      return Math.max(
+        1,
+        Math.min(
+          100,
+          Math.round((1 - Math.log(clamped / 5) / Math.log(1000)) * 100),
+        ),
+      );
     },
 
     async ttSetDelayFromInput(val) {
       const delay = Math.max(5, Math.min(5000, parseInt(val) || 5));
       this.ttSpeedPct = this._pctFromDelay(delay);
       await this.ttSendSpeed();
+    },
+
+    async ttConfirm() {
+      this.ttDetectLoading = true;
+      this.ttDetectError = "";
+      try {
+        const r = await fetch("/api/turntable/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ port: this.ttPendingPort, sudo_password: this.ttSudoPass }),
+        });
+        if (r.ok) {
+          this.showTtDetectModal = false;
+          this.ttPendingPort = null;
+          this.ttSudoPass = "";
+          this.ttNeedsSudo = false;
+        } else {
+          const err = await r.json();
+          if (r.status === 403) {
+            this.ttNeedsSudo = true;
+          }
+          this.ttDetectError = err.detail;
+        }
+      } catch (_) {
+        this.ttDetectError = "Request failed — is the server running?";
+      }
+      this.ttDetectLoading = false;
+    },
+
+    async ttReject() {
+      await fetch("/api/turntable/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ port: this.ttPendingPort }),
+      });
+      this.showTtDetectModal = false;
+      this.ttPendingPort = null;
+      this.ttSudoPass = "";
+      this.ttNeedsSudo = false;
+      this.ttDetectError = "";
+    },
+
+    ttSelectRejected(port) {
+      this.ttPort = port;
     },
   };
 }

@@ -15,6 +15,12 @@ try:
 except ImportError:
     serial = None
 
+ARDUINO_VIDS = {
+    0x2341,  # Arduino LLC (Uno, Mega, etc.)
+    0x1A86,  # QinHeng CH340/CH341 (clones/Nanos)
+    0x0403,  # FTDI FT232 (older boards)
+}
+
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -29,8 +35,16 @@ STATS_DIR.mkdir(exist_ok=True)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    scan = asyncio.create_task(_turntable_scan_task())
+    watchdog = asyncio.create_task(_turntable_watchdog_task())
     yield
-    _kill_robot_procs()  # resolved at call time — defined below
+    scan.cancel()
+    watchdog.cancel()
+    try:
+        await asyncio.gather(scan, watchdog)
+    except asyncio.CancelledError:
+        pass
+    _kill_robot_procs()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -52,6 +66,8 @@ _turntable = None  # serial.Serial instance when connected
 _tt_enabled: bool = False
 _tt_direction: str = "CW"
 _tt_speed: int = 50  # microseconds between pulses
+_tt_pending_port: Optional[str] = None  # detected Arduino port awaiting user confirm
+_tt_rejected_ports: set = set()  # ports user declined; auto-scanner skips these
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -81,6 +97,35 @@ def _close_turntable():
 
 atexit.register(_kill_robot_procs)
 atexit.register(_close_turntable)
+
+async def _turntable_scan_task():
+    """Scan for Arduino by VID every 2 s; set _tt_pending_port when found."""
+    global _tt_pending_port
+    while True:
+        if serial is not None and not (_turntable and _turntable.is_open):
+            try:
+                ports = serial.tools.list_ports.comports()
+                port_devices = {p.device for p in ports}
+                if _tt_pending_port and _tt_pending_port not in port_devices:
+                    _tt_pending_port = None  # port disappeared while modal open
+                if _tt_pending_port is None:
+                    for p in ports:
+                        if p.vid in ARDUINO_VIDS and p.device not in _tt_rejected_ports:
+                            _tt_pending_port = p.device
+                            break
+            except Exception:
+                pass
+        await asyncio.sleep(2)
+
+async def _turntable_watchdog_task():
+    """Detect Arduino unplug by polling in_waiting every 2 s."""
+    while True:
+        if _turntable and _turntable.is_open:
+            try:
+                _ = _turntable.in_waiting
+            except Exception:
+                _close_turntable()
+        await asyncio.sleep(2)
 
 async def _schedule_safety_shutdown():
     """Grace-period watchdog: if no browser client reconnects within 8 s, stop the robot."""
@@ -527,7 +572,7 @@ async def hand_guide_type(body: HandGuideTypeBody):
 # ── turntable control ──────────────────────────────────────────────────────
 
 class TurntableConnectBody(BaseModel):
-    port: str = "/dev/ttyUSB0"
+    port: str = "/dev/ttyACM0"
     baud: int = 9600
 
 @app.post("/api/turntable/connect")
@@ -551,7 +596,64 @@ async def turntable_disconnect():
 @app.get("/api/turntable/status")
 async def turntable_status():
     connected = _turntable is not None and _turntable.is_open
-    return {"connected": connected, "enabled": _tt_enabled, "direction": _tt_direction, "speed": _tt_speed}
+    return {
+        "connected": connected,
+        "enabled": _tt_enabled,
+        "direction": _tt_direction,
+        "speed": _tt_speed,
+        "pending_port": _tt_pending_port,
+        "rejected_ports": sorted(_tt_rejected_ports),
+    }
+
+class TurntableConfirmBody(BaseModel):
+    port: str
+    sudo_password: str = ""
+
+@app.post("/api/turntable/confirm")
+async def turntable_confirm(body: TurntableConfirmBody):
+    global _turntable, _tt_pending_port
+    if serial is None:
+        raise HTTPException(500, "pyserial not installed")
+    if body.port != _tt_pending_port:
+        raise HTTPException(400, "Port is not pending confirmation")
+    _close_turntable()
+    try:
+        _turntable = serial.Serial(body.port, 9600, timeout=1)
+        _tt_pending_port = None
+        return {"ok": True}
+    except PermissionError:
+        _turntable = None
+        if not body.sudo_password:
+            raise HTTPException(403, "Permission denied — enter sudo password or add user to dialout group")
+        result = subprocess.run(
+            ["sudo", "-S", "chmod", "a+rw", body.port],
+            input=(body.sudo_password + "\n").encode(),
+            capture_output=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            raise HTTPException(500, "chmod failed — wrong sudo password?")
+        try:
+            _turntable = serial.Serial(body.port, 9600, timeout=1)
+            _tt_pending_port = None
+            return {"ok": True}
+        except Exception as e:
+            _turntable = None
+            raise HTTPException(500, str(e))
+    except Exception as e:
+        _turntable = None
+        raise HTTPException(500, str(e))
+
+class TurntableRejectBody(BaseModel):
+    port: str
+
+@app.post("/api/turntable/reject")
+async def turntable_reject(body: TurntableRejectBody):
+    global _tt_pending_port
+    _tt_rejected_ports.add(body.port)
+    if _tt_pending_port == body.port:
+        _tt_pending_port = None
+    return {"ok": True}
 
 def _tt_send(cmd: str):
     if _turntable is None or not _turntable.is_open:

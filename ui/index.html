@@ -393,27 +393,40 @@
     <div class="max-w-md mx-auto px-6 py-8">
 
       <!-- Connection — inline row, no card -->
-      <div class="flex items-end gap-3 pb-6 border-b border-chrome">
-        <div class="flex-1 min-w-0">
-          <label for="tt-port" class="block text-[11px] font-medium text-dim mb-1">Serial port</label>
-          <input id="tt-port" x-model="ttPort" :disabled="ttConnected"
-                 class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-3 py-1.5 text-sm font-mono text-gray-900 transition-colors duration-150" />
+      <div class="pb-6 border-b border-chrome">
+        <div class="flex items-end gap-3">
+          <div class="flex-1 min-w-0">
+            <label for="tt-port" class="block text-[11px] font-medium text-dim mb-1">Serial port</label>
+            <input id="tt-port" x-model="ttPort" :disabled="ttConnected"
+                   class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-3 py-1.5 text-sm font-mono text-gray-900 transition-colors duration-150" />
+          </div>
+          <div class="flex items-center gap-3 flex-shrink-0">
+            <button x-show="!ttConnected" @click="ttConnect()" :disabled="ttLoading"
+                    class="focus-ring px-4 py-1.5 text-sm font-medium text-white bg-accent-ui hover:bg-accent-ui rounded-md transition-colors duration-150"
+                    :class="ttLoading ? 'opacity-60 cursor-not-allowed' : ''">
+              Connect
+            </button>
+            <button x-show="ttConnected" @click="ttDisconnect()"
+                    class="focus-ring px-4 py-1.5 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-md border border-red-200 transition-colors duration-150">
+              Disconnect
+            </button>
+            <div class="flex items-center gap-1.5 text-xs font-medium select-none"
+                 :class="ttConnected ? 'text-green-700' : 'text-gray-400'">
+              <span class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                    :class="ttConnected ? 'bg-green-500' : 'bg-gray-300'" aria-hidden="true"></span>
+              <span x-text="ttConnected ? 'Connected' : 'Not connected'"></span>
+            </div>
+          </div>
         </div>
-        <div class="flex items-center gap-3 flex-shrink-0">
-          <button x-show="!ttConnected" @click="ttConnect()" :disabled="ttLoading"
-                  class="focus-ring px-4 py-1.5 text-sm font-medium text-white bg-accent-ui hover:bg-accent-ui rounded-md transition-colors duration-150"
-                  :class="ttLoading ? 'opacity-60 cursor-not-allowed' : ''">
-            Connect
-          </button>
-          <button x-show="ttConnected" @click="ttDisconnect()"
-                  class="focus-ring px-4 py-1.5 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-md border border-red-200 transition-colors duration-150">
-            Disconnect
-          </button>
-          <div class="flex items-center gap-1.5 text-xs font-medium select-none"
-               :class="ttConnected ? 'text-green-700' : 'text-gray-400'">
-            <span class="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                  :class="ttConnected ? 'bg-green-500' : 'bg-gray-300'" aria-hidden="true"></span>
-            <span x-text="ttConnected ? 'Connected' : 'Not connected'"></span>
+        <!-- Skipped ports — click to populate port input -->
+        <div x-show="ttRejectedPorts.length > 0" class="mt-2.5">
+          <div class="text-[10px] font-medium text-dim mb-1.5">Skipped ports</div>
+          <div class="flex flex-wrap gap-1.5">
+            <template x-for="p in ttRejectedPorts" :key="p">
+              <button @click="ttSelectRejected(p)"
+                      class="focus-ring px-2.5 py-1 text-xs font-mono text-gray-600 bg-gray-50 hover:bg-gray-100 border border-chrome-input rounded-md transition-colors duration-150"
+                      x-text="p"></button>
+            </template>
           </div>
         </div>
       </div>
@@ -820,6 +833,60 @@
         </div>
       </div>
 
+    </div>
+  </div>
+
+  <!-- ── Arduino Detection Modal ── -->
+  <div x-show="showTtDetectModal" x-cloak
+       class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
+       role="dialog" aria-modal="true" aria-labelledby="tt-detect-title" x-trap="showTtDetectModal">
+    <div class="bg-surface-raised rounded-xl w-full max-w-sm mx-4 shadow-modal">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-chrome">
+        <span id="tt-detect-title" class="text-sm font-semibold text-gray-900">Arduino Detected</span>
+        <button @click="ttReject()" aria-label="Close"
+                class="focus-ring w-7 h-7 flex items-center justify-center rounded-md text-dim hover:text-gray-900 hover:bg-gray-100 transition-colors duration-150 text-base leading-none">&times;</button>
+      </div>
+      <div class="p-5 space-y-4">
+        <p class="text-sm text-gray-700">
+          Arduino found on
+          <code class="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded" x-text="ttPendingPort"></code>.
+          Connect to turntable?
+        </p>
+
+        <!-- sudo password — appears only after permission error -->
+        <div x-show="ttNeedsSudo" class="space-y-3">
+          <div class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+            Permission denied. Enter sudo password, or add user to dialout group:
+            <code class="block mt-1.5 font-mono text-[11px] select-all">sudo usermod -aG dialout $USER</code>
+          </div>
+          <div>
+            <label for="tt-sudo-pass" class="block text-xs font-medium text-dim mb-1">Sudo password</label>
+            <input id="tt-sudo-pass" type="password" x-model="ttSudoPass"
+                   @keydown.enter="ttConfirm()"
+                   class="focus-ring w-full bg-surface-input border border-chrome-input rounded-lg px-3 py-2 text-sm font-mono text-gray-900 transition-colors duration-150"
+                   placeholder="Enter sudo password" />
+          </div>
+        </div>
+
+        <!-- error (non-permission) -->
+        <div x-show="ttDetectError && !ttNeedsSudo"
+             class="flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <span aria-hidden="true" class="flex-shrink-0 mt-px">⚠</span>
+          <span x-text="ttDetectError"></span>
+        </div>
+
+        <div class="flex gap-2 pt-1">
+          <button @click="ttReject()"
+                  class="focus-ring flex-1 px-4 py-2 text-sm font-medium text-gray-600 bg-btn hover:bg-btn border border-chrome-input rounded-lg transition-colors duration-150">
+            Not now
+          </button>
+          <button @click="ttConfirm()" :disabled="ttDetectLoading"
+                  class="focus-ring flex-1 px-4 py-2 text-sm font-semibold text-white bg-accent-ui hover:bg-accent-ui rounded-lg transition-colors duration-150"
+                  :class="ttDetectLoading ? 'opacity-60 cursor-not-allowed' : ''"
+                  x-text="ttDetectLoading ? 'Connecting…' : (ttNeedsSudo ? 'Connect with sudo' : 'Connect')">
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 
