@@ -12,6 +12,7 @@ from typing import Optional
 
 try:
     import serial
+    import serial.tools.list_ports
 except ImportError:
     serial = None
 
@@ -578,12 +579,17 @@ class TurntableConnectBody(BaseModel):
 @app.post("/api/turntable/connect")
 async def turntable_connect(body: TurntableConnectBody):
     global _turntable
+    global _tt_pending_port
     if serial is None:
         raise HTTPException(500, "pyserial not installed — run: pip install pyserial")
     _close_turntable()
     try:
         _turntable = serial.Serial(body.port, body.baud, timeout=1)
         return {"ok": True}
+    except PermissionError:
+        _turntable = None
+        _tt_pending_port = body.port
+        raise HTTPException(403, "Permission denied — enter sudo password or add user to dialout group")
     except Exception as e:
         _turntable = None
         raise HTTPException(500, str(e))

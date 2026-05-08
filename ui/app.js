@@ -594,7 +594,15 @@ function app() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ port: this.ttPort }),
         });
-        if (!r.ok) this.ttError = (await r.json()).detail;
+        if (r.status === 403) {
+          this.ttPendingPort = this.ttPort;
+          this.ttSudoPass = "";
+          this.ttDetectError = (await r.json()).detail;
+          this.ttNeedsSudo = true;
+          this.showTtDetectModal = true;
+        } else if (!r.ok) {
+          this.ttError = (await r.json()).detail;
+        }
       } catch (e) {
         this.ttError = "Request failed — is the server running?";
       }
