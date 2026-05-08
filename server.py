@@ -671,14 +671,18 @@ def _tt_send(cmd: str):
     _turntable.write((cmd + "\n").encode())
 
 async def _tt_sync_state():
-    # Arduino resets on DTR (serial open) — wait for boot then push current state
-    await asyncio.sleep(1.5)
-    _tt_send(f"DIR:{_tt_direction}")
-    _tt_send(f"SPEED:{_tt_speed}")
+    await asyncio.sleep(0.3)
+    try:
+        _tt_send(f"DIR:{_tt_direction}")
+        _tt_send(f"SPEED:{_tt_speed}")
+    except Exception:
+        pass
 
 @app.post("/api/turntable/enable")
 async def turntable_enable():
     global _tt_enabled
+    _tt_send(f"DIR:{_tt_direction}")
+    _tt_send(f"SPEED:{_tt_speed}")
     _tt_send("ENABLE")
     _tt_enabled = True
     return {"ok": True}
