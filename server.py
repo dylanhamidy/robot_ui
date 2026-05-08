@@ -586,12 +586,11 @@ async def turntable_connect(body: TurntableConnectBody):
     try:
         _turntable = serial.Serial(body.port, body.baud, timeout=1)
         return {"ok": True}
-    except PermissionError:
-        _turntable = None
-        _tt_pending_port = body.port
-        raise HTTPException(403, "Permission denied — enter sudo password or add user to dialout group")
     except Exception as e:
         _turntable = None
+        if isinstance(e, PermissionError) or getattr(e, "errno", None) == 13:
+            _tt_pending_port = body.port
+            raise HTTPException(403, "Permission denied — enter sudo password or add user to dialout group")
         raise HTTPException(500, str(e))
 
 @app.post("/api/turntable/disconnect")
@@ -623,12 +622,17 @@ async def turntable_confirm(body: TurntableConfirmBody):
     if body.port != _tt_pending_port:
         raise HTTPException(400, "Port is not pending confirmation")
     _close_turntable()
+    def _is_permission_err(e: Exception) -> bool:
+        return isinstance(e, PermissionError) or getattr(e, "errno", None) == 13
+
     try:
         _turntable = serial.Serial(body.port, 9600, timeout=1)
         _tt_pending_port = None
         return {"ok": True}
-    except PermissionError:
+    except Exception as e:
         _turntable = None
+        if not _is_permission_err(e):
+            raise HTTPException(500, str(e))
         if not body.sudo_password:
             raise HTTPException(403, "Permission denied — enter sudo password or add user to dialout group")
         result = subprocess.run(
@@ -643,12 +647,9 @@ async def turntable_confirm(body: TurntableConfirmBody):
             _turntable = serial.Serial(body.port, 9600, timeout=1)
             _tt_pending_port = None
             return {"ok": True}
-        except Exception as e:
+        except Exception as e2:
             _turntable = None
-            raise HTTPException(500, str(e))
-    except Exception as e:
-        _turntable = None
-        raise HTTPException(500, str(e))
+            raise HTTPException(500, str(e2))
 
 class TurntableRejectBody(BaseModel):
     port: str
