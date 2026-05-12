@@ -478,6 +478,7 @@ async def _run_plan_task(plan_name: str, plan_path: Path):
                 await _broadcast("[WARN] Turntable not connected — skipping step\n")
                 continue
 
+            await _broadcast(f"Turntable: {direction} · {speed_us} μs · {duration:.1f}s\n")
             try:
                 _turntable.write(b"ENABLE\n")
                 await asyncio.sleep(0.05)
@@ -498,8 +499,10 @@ async def _run_plan_task(plan_name: str, plan_path: Path):
     if _stop_requested:
         result = "success"
         _stop_requested = False
-    else:
+    elif has_robot_steps:
         result = "unknown" if last_rc < 0 else "fail"
+    else:
+        result = "success"  # turntable-only: natural completion is expected
 
     _record_stat(plan_name, result)
     await _broadcast(f"[DONE] Plan '{plan_name}' finished — {result}\n")
