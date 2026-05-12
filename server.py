@@ -4,6 +4,7 @@ import json
 import os
 import signal
 import subprocess
+import tempfile
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -150,7 +151,13 @@ def _stats_path(name: str) -> Path:
     return STATS_DIR / f"{name}.json"
 
 def _coerce_step_floats(step: dict) -> dict:
-    """Ensure all numeric fields in a step are stored as Python floats."""
+    """Ensure all numeric fields in a step are stored as the correct Python types."""
+    if step.get("type") == "Turntable":
+        if "speed_us" in step:
+            step["speed_us"] = int(step["speed_us"])
+        if "duration" in step:
+            step["duration"] = float(step["duration"])
+        return step
     if "pos" in step:
         step["pos"] = [float(v) for v in step["pos"]]
     for key in ("vel", "acc"):
@@ -368,7 +375,7 @@ async def robot_start(body: StartBody):
     return {"ok": True}
 
 async def _run_plan_task(plan_name: str, plan_path: Path):
-    global _active_proc, _active_plan, _build_proc
+    global _active_proc, _active_plan, _build_proc, _stop_requested
 
     # Check if the package is already built
     await _broadcast("[STEP] Checking lux_dsr_control package...\n")
@@ -407,30 +414,91 @@ async def _run_plan_task(plan_name: str, plan_path: Path):
 
         await _broadcast("[INFO] Build succeeded\n")
 
-    # Source ROS env and launch the plan node
-    _active_proc = subprocess.Popen(
-        "source /opt/ros/humble/setup.bash && "
-        "source ~/ros2_ws/install/setup.bash && "
-        f"ros2 run lux_dsr_control move_joint_node --plan-file {plan_path}",
-        shell=True, executable="/bin/bash",
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        preexec_fn=os.setsid,
-    )
-    await _watch_proc(_active_proc, plan_name)
+    # Split plan into robot/turntable segments
+    plan_data = json.loads(plan_path.read_text())
+    steps = plan_data.get("steps", [])
 
-async def _watch_proc(proc: subprocess.Popen, plan_name: str):
-    global _active_proc, _active_plan, _stop_requested
-    loop = asyncio.get_event_loop()
+    segments: list = []
+    robot_buf: list = []
+    for step in steps:
+        if step.get("type") == "Turntable":
+            if robot_buf:
+                segments.append(("robot", list(robot_buf)))
+                robot_buf = []
+            segments.append(("turntable", step))
+        else:
+            robot_buf.append(step)
+    if robot_buf:
+        segments.append(("robot", robot_buf))
+
     t_start = time.monotonic()
-    await _stream_proc(proc)
-    rc = await loop.run_in_executor(None, proc.wait)
-    elapsed = time.monotonic() - t_start
-    await _broadcast(f"[STAT] Finished in {elapsed:.1f}s\n")
+    loop = asyncio.get_event_loop()
+    last_rc = 0
+
+    for seg_type, seg_data in segments:
+        if _stop_requested:
+            break
+
+        if seg_type == "robot":
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False, dir=str(PLANS_DIR)
+            ) as tf:
+                json.dump({
+                    "name": plan_data["name"],
+                    "created_at": plan_data.get("created_at", ""),
+                    "steps": seg_data,
+                }, tf)
+                tmp_path = tf.name
+            try:
+                _active_proc = subprocess.Popen(
+                    "source /opt/ros/humble/setup.bash && "
+                    "source ~/ros2_ws/install/setup.bash && "
+                    f"ros2 run lux_dsr_control move_joint_node --plan-file {tmp_path}",
+                    shell=True, executable="/bin/bash",
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    preexec_fn=os.setsid,
+                )
+                await _stream_proc(_active_proc)
+                last_rc = await loop.run_in_executor(None, _active_proc.wait)
+            finally:
+                _active_proc = None
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+        else:  # turntable
+            direction = seg_data.get("direction", "CW")
+            speed_us = int(seg_data.get("speed_us", 500))
+            duration = float(seg_data.get("duration", 1.0))
+
+            if _turntable is None or not _turntable.is_open:
+                await _broadcast("[WARN] Turntable not connected — skipping step\n")
+                continue
+
+            try:
+                _turntable.write(b"ENABLE\n")
+                await asyncio.sleep(0.05)
+                _turntable.write(f"DIR:{direction}\n".encode())
+                await asyncio.sleep(0.05)
+                _turntable.write(f"SPEED:{speed_us}\n".encode())
+                elapsed = 0.0
+                while elapsed < duration and not _stop_requested:
+                    await asyncio.sleep(0.1)
+                    elapsed += 0.1
+                _turntable.write(b"DISABLE\n")
+            except Exception as e:
+                await _broadcast(f"[WARN] Turntable error: {e}\n")
+
+    elapsed_total = time.monotonic() - t_start
+    await _broadcast(f"[STAT] Finished in {elapsed_total:.1f}s\n")
+
     if _stop_requested:
         result = "success"
         _stop_requested = False
     else:
-        result = "unknown" if rc < 0 else "fail" # rc==0 spontaneous exit -> also treat as fail since we expect user to stop with SIGINT
+        result = "unknown" if last_rc < 0 else "fail"
+
     _record_stat(plan_name, result)
     await _broadcast(f"[DONE] Plan '{plan_name}' finished — {result}\n")
     _active_proc = None
@@ -445,6 +513,10 @@ async def robot_stop():
             _build_proc.kill()
         except ProcessLookupError:
             pass
+        return {"ok": True}
+    # During turntable step: plan active but no robot process
+    if _active_plan is not None and (_active_proc is None or _active_proc.poll() is not None):
+        _stop_requested = True
         return {"ok": True}
     if not _active_proc or _active_proc.poll() is not None:
         raise HTTPException(409, "No plan running")

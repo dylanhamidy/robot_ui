@@ -317,24 +317,28 @@
                   <th class="pb-2.5 text-left w-16 font-semibold">Vel</th>
                   <th class="pb-2.5 text-left w-16 font-semibold">Acc</th>
                   <th class="pb-2.5 text-left w-16 font-semibold">Time</th>
+                  <th class="pb-2.5 text-left w-16 font-semibold">Dir</th>
                 </tr>
               </thead>
               <tbody>
                 <template x-for="(step, i) in selected.steps" :key="i">
                   <tr class="border-b border-chrome hover:bg-gray-50 transition-colors duration-100 last:border-0">
                     <td class="py-2.5 text-gray-400 text-xs font-mono" x-text="i + 1"></td>
-                    <td class="py-2.5">
+                    <td class="py-2.5 pr-4">
                       <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium"
-                            :class="step.type === 'MoveJ' ? 'bg-blue-50 text-blue-700' : 'bg-violet-50 text-violet-700'"
+                            :class="step.type === 'MoveJ' ? 'bg-blue-50 text-blue-700' : step.type === 'Turntable' ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400' : 'bg-violet-50 text-violet-700'"
                             x-text="step.type"></span>
                     </td>
                     <td class="py-2.5 font-mono text-xs text-gray-700"
-                        x-text="step.pos.map(v => parseFloat(v).toFixed(1)).join(', ')"></td>
+                        x-text="step.type === 'Turntable' ? '' : step.pos.map(v => parseFloat(v).toFixed(1)).join(', ')"></td>
                     <td class="py-2.5 text-xs text-dim font-mono"
-                        x-text="step.vel != null ? parseFloat(Array.isArray(step.vel) ? step.vel[0] : step.vel).toFixed(1) : '—'"></td>
+                        x-text="step.type === 'Turntable' ? step.speed_us : (step.vel != null ? parseFloat(Array.isArray(step.vel) ? step.vel[0] : step.vel).toFixed(1) : '—')"></td>
                     <td class="py-2.5 text-xs text-dim font-mono"
-                        x-text="step.acc != null ? parseFloat(Array.isArray(step.acc) ? step.acc[0] : step.acc).toFixed(1) : '—'"></td>
-                    <td class="py-2.5 text-xs text-dim font-mono" x-text="step.time != null ? parseFloat(step.time).toFixed(1) : '—'"></td>
+                        x-text="step.type === 'Turntable' ? '—' : (step.acc != null ? parseFloat(Array.isArray(step.acc) ? step.acc[0] : step.acc).toFixed(1) : '—')"></td>
+                    <td class="py-2.5 text-xs text-dim font-mono"
+                        x-text="step.type === 'Turntable' ? step.duration : (step.time != null ? parseFloat(step.time).toFixed(1) : '—')"></td>
+                    <td class="py-2.5 text-xs text-dim font-mono"
+                        x-text="step.type === 'Turntable' ? step.direction : '—'"></td>
                   </tr>
                 </template>
               </tbody>
@@ -641,16 +645,21 @@
 
       <!-- Mode tabs (only when connected) + Plan name — always outside tab bodies -->
       <div class="px-5 pt-5 space-y-4">
-        <div x-show="connected" class="flex gap-1 p-1 bg-surface-input border border-chrome rounded-lg w-fit">
+        <div class="flex gap-1 p-1 bg-surface-input border border-chrome rounded-lg w-fit">
           <button @click="planMode = 'manual'"
                   class="focus-ring px-4 py-1.5 text-xs font-medium rounded-md transition-all duration-150"
                   :class="planMode === 'manual' ? 'bg-surface-raised text-gray-900 shadow-sm' : 'text-dim hover:text-gray-700'">
             Manual Steps
           </button>
-          <button @click="switchToHandGuide()"
+          <button x-show="connected" @click="switchToHandGuide()"
                   class="focus-ring px-4 py-1.5 text-xs font-medium rounded-md transition-all duration-150"
                   :class="planMode === 'handguide' ? 'bg-surface-raised text-gray-900 shadow-sm' : 'text-dim hover:text-gray-700'">
             Hand Guide
+          </button>
+          <button @click="planMode = 'turntable'"
+                  class="focus-ring px-4 py-1.5 text-xs font-medium rounded-md transition-all duration-150"
+                  :class="planMode === 'turntable' ? 'bg-surface-raised text-gray-900 shadow-sm' : 'text-dim hover:text-gray-700'">
+            Turntable
           </button>
         </div>
 
@@ -669,6 +678,109 @@
 
       <!-- Unified scrollable body -->
       <div class="flex-1 overflow-y-auto px-5 pb-5 pt-4 space-y-4">
+
+        <!-- Turntable tab controls -->
+        <div x-show="planMode === 'turntable'"
+             class="rounded-lg border border-chrome bg-surface-input p-4 space-y-5">
+
+          <!-- Connection status -->
+          <div class="space-y-1">
+            <div class="flex items-center gap-1.5 text-xs font-medium select-none"
+                 :class="ttConnected ? 'text-green-700' : 'text-gray-400'">
+              <span class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                    :class="ttConnected ? 'bg-green-500' : 'bg-gray-300'" aria-hidden="true"></span>
+              <span x-text="ttConnected ? 'Turntable connected' : 'Not connected'"></span>
+            </div>
+            <p x-show="!ttConnected" class="text-[11px] text-dim ml-3">Connect on the Turntable Control page first.</p>
+          </div>
+
+          <!-- Controls: dimmed when not connected -->
+          <div class="space-y-4 transition-opacity duration-200" :class="!ttConnected ? 'opacity-40 pointer-events-none' : ''">
+
+            <!-- Power -->
+            <button @click="ttEnabled ? modalTtDisableMotor() : modalTtEnableMotor()"
+                    :disabled="modalTtLoading"
+                    class="focus-ring w-full h-20 rounded-xl text-white transition-all duration-200"
+                    :class="[
+                      ttEnabled ? 'bg-green-600 hover:bg-green-700 ring-2 ring-green-200' : 'bg-accent-ui hover:bg-accent-ui',
+                      modalTtLoading ? 'opacity-60 cursor-not-allowed' : ''
+                    ]">
+              <div class="flex flex-col items-center gap-1" aria-live="polite">
+                <span class="text-[15px] font-semibold" x-text="ttEnabled ? 'Running' : 'Enable Motor'"></span>
+                <span class="text-xs font-normal opacity-60"
+                      x-text="ttEnabled ? modalTtDirection + ' · ' + modalTtSpeedDelay + ' μs' : 'Motor stopped'"></span>
+              </div>
+            </button>
+
+            <!-- Direction -->
+            <div>
+              <div class="text-[11px] font-medium text-dim mb-2">Direction</div>
+              <div class="flex rounded-lg overflow-hidden border border-chrome-input w-fit" role="group" aria-label="Rotation direction">
+                <button @click="modalTtSetDirection('CW')"
+                        class="focus-ring px-8 py-2 text-sm font-semibold transition-colors duration-150"
+                        :class="modalTtDirection === 'CW' ? 'bg-accent-ui text-white' : 'bg-surface-raised text-gray-700 hover:bg-btn'">
+                  ↻ CW
+                </button>
+                <button @click="modalTtSetDirection('CCW')"
+                        class="focus-ring px-8 py-2 text-sm font-semibold border-l border-chrome-input transition-colors duration-150"
+                        :class="modalTtDirection === 'CCW' ? 'bg-accent-ui text-white' : 'bg-surface-raised text-gray-700 hover:bg-btn'">
+                  ↺ CCW
+                </button>
+              </div>
+            </div>
+
+            <!-- Speed -->
+            <div>
+              <div class="flex items-baseline justify-between mb-2">
+                <div class="text-[11px] font-medium text-dim">Speed</div>
+                <div class="flex items-baseline gap-1">
+                  <input type="number" min="5" max="5000"
+                         :value="modalTtSpeedDelay"
+                         @change="modalTtSetDelayFromInput($event.target.value)"
+                         @keydown.enter="modalTtSetDelayFromInput($event.target.value); $event.target.blur()"
+                         class="no-spinner w-20 text-right bg-transparent border-0 border-b border-chrome-input font-mono text-sm text-gray-700 focus:outline-none focus:border-gray-400 transition-colors duration-150"
+                         aria-label="Speed delay in microseconds" />
+                  <span class="text-xs text-dim">μs</span>
+                </div>
+              </div>
+              <input type="range" min="1" max="100" x-model.number="modalTtSpeedPct" @change="modalTtSendSpeed()"
+                     class="w-full mb-1" style="accent-color: var(--btn-primary)" aria-label="Speed" />
+              <div class="flex justify-between text-[11px] text-dim mb-3 select-none px-0.5">
+                <span>Slow</span>
+                <span>Fast</span>
+              </div>
+              <div class="flex gap-1.5">
+                <button @click="modalTtSetPreset(20)"  class="focus-ring flex-1 py-1.5 text-xs font-medium bg-btn hover:bg-btn text-gray-500 rounded-md border border-chrome-input transition-colors duration-150">Slow</button>
+                <button @click="modalTtSetPreset(50)"  class="focus-ring flex-1 py-1.5 text-xs font-medium bg-btn hover:bg-btn text-gray-600 rounded-md border border-chrome-input transition-colors duration-150">Med</button>
+                <button @click="modalTtSetPreset(75)"  class="focus-ring flex-1 py-1.5 text-xs font-medium bg-btn hover:bg-btn text-gray-700 rounded-md border border-chrome-input transition-colors duration-150">Fast</button>
+                <button @click="modalTtSetPreset(100)" class="focus-ring flex-1 py-1.5 text-xs font-semibold text-orange-700 bg-orange-50 hover:bg-orange-100 rounded-md border border-orange-200 transition-colors duration-150">Max</button>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Error -->
+          <div x-show="modalTtError"
+               class="flex items-start gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2.5">
+            <span aria-hidden="true" class="flex-shrink-0">⚠</span>
+            <span x-text="modalTtError"></span>
+          </div>
+
+          <!-- Add step -->
+          <div class="border-t border-chrome pt-4 space-y-3">
+            <div>
+              <label for="modal-tt-duration" class="block text-[11px] font-medium text-dim mb-1">Spin duration (seconds)</label>
+              <input id="modal-tt-duration" type="number" min="0.1" step="0.1"
+                     x-model.number="modalTtDuration"
+                     class="focus-ring w-full bg-surface-raised border border-chrome-input rounded-lg px-3 py-2 text-sm font-mono text-gray-900 transition-colors duration-150" />
+            </div>
+            <button @click="addTurntableStep()"
+                    class="focus-ring w-full py-2.5 text-sm font-semibold rounded-lg border border-chrome-input bg-surface-raised hover:bg-btn text-gray-700 transition-colors duration-150">
+              + Add Turntable Step
+            </button>
+          </div>
+
+        </div>
 
         <!-- Hand guide controls (only in hand guide mode) -->
         <div x-show="planMode === 'handguide'"
@@ -735,7 +847,7 @@
           </div>
 
           <div x-show="modalSteps.length === 0" class="text-xs text-dim text-center py-6 border border-dashed border-chrome rounded-lg">
-            <span x-text="planMode === 'handguide' ? 'No points recorded yet — enable hand guide and record.' : 'No steps yet — click + Add Step.'"></span>
+            <span x-text="planMode === 'handguide' ? 'No points recorded yet — enable hand guide and record.' : planMode === 'turntable' ? 'No steps yet — configure turntable above and click + Add Turntable Step.' : 'No steps yet — click + Add Step.'"></span>
           </div>
 
           <div class="space-y-2" x-ref="stepsContainer">
@@ -751,6 +863,7 @@
                           class="focus-ring bg-surface-input border border-chrome-input rounded-md pl-2.5 pr-7 py-1 text-sm font-mono text-gray-900 transition-colors duration-150">
                     <option>MoveJ</option>
                     <option>MoveL</option>
+                    <option>Turntable</option>
                   </select>
                   <button x-show="planMode === 'handguide' && handGuideEnabled"
                           @click="selectStep(i)"
@@ -764,36 +877,77 @@
                     Remove
                   </button>
                 </div>
-                <div class="grid grid-cols-6 gap-1 mb-1">
-                  <template x-for="(_, j) in [0,1,2,3,4,5]" :key="j">
-                    <input type="number" step="any"
-                           :placeholder="step.type === 'MoveJ' ? ['J1','J2','J3','J4','J5','J6'][j] : ['X','Y','Z','A','B','C'][j]"
-                           :aria-label="step.type === 'MoveJ'
-                             ? (['J1','J2','J3','J4','J5','J6'][j] + '°, step ' + (i + 1))
-                             : (j < 3 ? (['X','Y','Z'][j] + ' mm, step ' + (i + 1)) : (['A','B','C'][j - 3] + '°, step ' + (i + 1)))"
-                           x-model.number="step.pos[j]" @change="markDirty()"
-                           class="no-spinner focus-ring bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 w-full transition-colors duration-150" />
-                  </template>
-                </div>
-                <div class="text-[10px] text-dim mb-2"
-                     x-text="step.type === 'MoveJ' ? 'J1 – J6 (all degrees)' : 'X, Y, Z (mm) · A, B, C (degrees)'"></div>
-                <div class="grid grid-cols-3 gap-2">
+                <!-- Robot step fields -->
+                <template x-if="step.type !== 'Turntable'">
                   <div>
-                    <label :for="'step-vel-' + i" class="block text-[11px] text-gray-500 mb-1">Vel</label>
-                    <input :id="'step-vel-' + i" type="number" step="any" x-model.number="step.vel" @change="markDirty()"
-                           class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
+                    <div class="grid grid-cols-6 gap-1 mb-1">
+                      <template x-for="(_, j) in [0,1,2,3,4,5]" :key="j">
+                        <input type="number" step="any"
+                               :placeholder="step.type === 'MoveJ' ? ['J1','J2','J3','J4','J5','J6'][j] : ['X','Y','Z','A','B','C'][j]"
+                               :aria-label="step.type === 'MoveJ'
+                                 ? (['J1','J2','J3','J4','J5','J6'][j] + '°, step ' + (i + 1))
+                                 : (j < 3 ? (['X','Y','Z'][j] + ' mm, step ' + (i + 1)) : (['A','B','C'][j - 3] + '°, step ' + (i + 1)))"
+                               x-model.number="step.pos[j]" @change="markDirty()"
+                               class="no-spinner focus-ring bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 w-full transition-colors duration-150" />
+                      </template>
+                    </div>
+                    <div class="text-[10px] text-dim mb-2"
+                         x-text="step.type === 'MoveJ' ? 'J1 – J6 (all degrees)' : 'X, Y, Z (mm) · A, B, C (degrees)'"></div>
+                    <div class="grid grid-cols-3 gap-2">
+                      <div>
+                        <label :for="'step-vel-' + i" class="block text-[11px] text-gray-500 mb-1">Vel</label>
+                        <input :id="'step-vel-' + i" type="number" step="any" x-model.number="step.vel" @change="markDirty()"
+                               class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
+                      </div>
+                      <div>
+                        <label :for="'step-acc-' + i" class="block text-[11px] text-gray-500 mb-1">Acc</label>
+                        <input :id="'step-acc-' + i" type="number" step="any" x-model.number="step.acc" @change="markDirty()"
+                               class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
+                      </div>
+                      <div>
+                        <label :for="'step-time-' + i" class="block text-[11px] text-gray-500 mb-1">Time (s)</label>
+                        <input :id="'step-time-' + i" type="number" step="any" x-model.number="step.time" @change="markDirty()"
+                               class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label :for="'step-acc-' + i" class="block text-[11px] text-gray-500 mb-1">Acc</label>
-                    <input :id="'step-acc-' + i" type="number" step="any" x-model.number="step.acc" @change="markDirty()"
-                           class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
+                </template>
+
+                <!-- Turntable step fields -->
+                <template x-if="step.type === 'Turntable'">
+                  <div class="space-y-2">
+                    <div class="flex items-center gap-3 flex-wrap">
+                      <div class="flex rounded-lg overflow-hidden border border-chrome-input" role="group" :aria-label="'Direction, step ' + (i + 1)">
+                        <button @click="step.direction = 'CW'; markDirty()"
+                                class="focus-ring px-5 py-1.5 text-xs font-semibold transition-colors duration-150"
+                                :class="step.direction === 'CW' ? 'bg-accent-ui text-white' : 'bg-surface-raised text-gray-700 hover:bg-btn'">
+                          ↻ CW
+                        </button>
+                        <button @click="step.direction = 'CCW'; markDirty()"
+                                class="focus-ring px-5 py-1.5 text-xs font-semibold border-l border-chrome-input transition-colors duration-150"
+                                :class="step.direction === 'CCW' ? 'bg-accent-ui text-white' : 'bg-surface-raised text-gray-700 hover:bg-btn'">
+                          ↺ CCW
+                        </button>
+                      </div>
+                      <div class="flex items-baseline gap-1">
+                        <label :for="'step-speed-' + i" class="text-[11px] text-gray-500">Speed</label>
+                        <input :id="'step-speed-' + i" type="number" min="5" max="5000"
+                               x-model.number="step.speed_us" @change="markDirty()"
+                               class="no-spinner focus-ring w-20 text-right bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150"
+                               :aria-label="'Speed μs, step ' + (i + 1)" />
+                        <span class="text-[11px] text-dim">μs</span>
+                      </div>
+                      <div class="flex items-baseline gap-1">
+                        <label :for="'step-dur-' + i" class="text-[11px] text-gray-500">Duration</label>
+                        <input :id="'step-dur-' + i" type="number" min="0.1" step="0.1"
+                               x-model.number="step.duration" @change="markDirty()"
+                               class="no-spinner focus-ring w-16 text-right bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150"
+                               :aria-label="'Duration seconds, step ' + (i + 1)" />
+                        <span class="text-[11px] text-dim">s</span>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label :for="'step-time-' + i" class="block text-[11px] text-gray-500 mb-1">Time (s)</label>
-                    <input :id="'step-time-' + i" type="number" step="any" x-model.number="step.time" @change="markDirty()"
-                           class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
-                  </div>
-                </div>
+                </template>
               </div>
             </template>
           </div>

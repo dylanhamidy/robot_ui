@@ -31,6 +31,17 @@ function app() {
       return Math.round(5 * Math.pow(1000, 1 - this.ttSpeedPct / 100));
     },
 
+    // Modal turntable — independent from page state, exclusive control when activated
+    modalTtDirection: "CW",
+    modalTtSpeedPct: 50,
+    modalTtDuration: 3.0,
+    modalTtActivated: false,
+    modalTtError: "",
+    modalTtLoading: false,
+    get modalTtSpeedDelay() {
+      return Math.round(5 * Math.pow(1000, 1 - this.modalTtSpeedPct / 100));
+    },
+
     // Setup modal
     showSetup: false,
     setupPass: "",
@@ -239,6 +250,7 @@ function app() {
       this.modalDirty = false;
       this.showUnsavedWarning = false;
       this.selectedStepIndex = null;
+      this._resetModalTt();
       fetch("/api/robot/hand_guide/points", { method: "DELETE" });
       this.showPlanModal = true;
       this.$nextTick(() => this.initSortable());
@@ -252,23 +264,132 @@ function app() {
       this.modalDirty = false;
       this.showUnsavedWarning = false;
       this.selectedStepIndex = null;
+      this._resetModalTt();
       fetch("/api/robot/hand_guide/points", { method: "DELETE" });
       this.modalName = this.selected.name;
-      this.modalSteps = JSON.parse(JSON.stringify(this.selected.steps)).map(
-        (s) => ({
+      this.modalSteps = JSON.parse(JSON.stringify(this.selected.steps)).map((s) => {
+        if (s.type === "Turntable") {
+          return {
+            type: "Turntable",
+            direction: s.direction || "CW",
+            speed_us: s.speed_us || 500,
+            duration: s.duration || 3.0,
+          };
+        }
+        return {
           type: s.type,
           pos: [...(s.pos || [0, 0, 0, 0, 0, 0])],
           vel: Array.isArray(s.vel) ? s.vel[0] : (s.vel ?? 30),
           acc: Array.isArray(s.acc) ? s.acc[0] : (s.acc ?? 30),
           time: s.time ?? 2,
-        }),
-      );
+        };
+      });
       this.showPlanModal = true;
       this.$nextTick(() => this.initSortable());
     },
 
     switchToHandGuide() {
       this.planMode = "handguide";
+    },
+
+    _resetModalTt() {
+      this.modalTtDirection = "CW";
+      this.modalTtSpeedPct = 50;
+      this.modalTtDuration = 3.0;
+      this.modalTtActivated = false;
+      this.modalTtError = "";
+      this.modalTtLoading = false;
+    },
+
+    async _cleanupModalTurntable() {
+      if (this.modalTtActivated) {
+        await fetch("/api/turntable/disable", { method: "POST" }).catch(() => {});
+        this.modalTtActivated = false;
+      }
+    },
+
+    async modalTtEnableMotor() {
+      this.modalTtLoading = true;
+      this.modalTtError = "";
+      try {
+        if (this.ttEnabled) {
+          await fetch("/api/turntable/disable", { method: "POST" });
+        }
+        await fetch("/api/turntable/direction", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ direction: this.modalTtDirection }),
+        });
+        await fetch("/api/turntable/speed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ delay_us: this.modalTtSpeedDelay }),
+        });
+        const r = await fetch("/api/turntable/enable", { method: "POST" });
+        if (r.ok) {
+          this.modalTtActivated = true;
+          this.modalTtError = "";
+        } else {
+          this.modalTtError = (await r.json()).detail;
+        }
+      } catch (_) {
+        this.modalTtError = "Request failed — is the server running?";
+      }
+      this.modalTtLoading = false;
+    },
+
+    async modalTtDisableMotor() {
+      this.modalTtLoading = true;
+      this.modalTtError = "";
+      const r = await fetch("/api/turntable/disable", { method: "POST" });
+      if (!r.ok) this.modalTtError = (await r.json()).detail;
+      this.modalTtLoading = false;
+    },
+
+    async modalTtSetDirection(dir) {
+      this.modalTtDirection = dir;
+      if (!this.modalTtActivated) return;
+      const r = await fetch("/api/turntable/direction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ direction: dir }),
+      });
+      if (!r.ok) this.modalTtError = (await r.json()).detail;
+    },
+
+    async modalTtSendSpeed() {
+      if (!this.modalTtActivated) return;
+      const r = await fetch("/api/turntable/speed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ delay_us: this.modalTtSpeedDelay }),
+      });
+      if (!r.ok) this.modalTtError = (await r.json()).detail;
+    },
+
+    async modalTtSetPreset(pct) {
+      this.modalTtSpeedPct = pct;
+      await this.modalTtSendSpeed();
+    },
+
+    async modalTtSetDelayFromInput(val) {
+      const delay = Math.max(5, Math.min(5000, parseInt(val) || 500));
+      this.modalTtSpeedPct = this._pctFromDelay(delay);
+      await this.modalTtSendSpeed();
+    },
+
+    addTurntableStep() {
+      this.modalSteps.push({
+        type: "Turntable",
+        direction: this.modalTtDirection,
+        speed_us: this.modalTtSpeedDelay,
+        duration: Number(this.modalTtDuration) || 3.0,
+      });
+      this.markDirty();
+      this.$nextTick(() => {
+        const last = this.$refs.stepsContainer?.lastElementChild;
+        if (last) last.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
     },
 
     markDirty() {
@@ -284,6 +405,10 @@ function app() {
         time: 2,
       });
       this.modalDirty = true;
+      this.$nextTick(() => {
+        const last = this.$refs.stepsContainer?.lastElementChild;
+        if (last) last.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
     },
 
     removeStep(i) {
@@ -300,9 +425,23 @@ function app() {
     },
 
     onStepTypeChange(i, step) {
-      step.pos = [0, 0, 0, 0, 0, 0];
-      step.vel = 30;
-      step.acc = 30;
+      if (step.type === "Turntable") {
+        step.direction = this.modalTtDirection || "CW";
+        step.speed_us = this.modalTtSpeedDelay || 500;
+        step.duration = this.modalTtDuration || 3.0;
+        delete step.pos;
+        delete step.vel;
+        delete step.acc;
+        delete step.time;
+      } else {
+        step.pos = [0, 0, 0, 0, 0, 0];
+        step.vel = 30;
+        step.acc = 30;
+        step.time = 2;
+        delete step.direction;
+        delete step.speed_us;
+        delete step.duration;
+      }
       this.markDirty();
     },
 
@@ -357,6 +496,14 @@ function app() {
 
     async savePlan() {
       const steps = this.modalSteps.map((s) => {
+        if (s.type === "Turntable") {
+          return {
+            type: "Turntable",
+            direction: s.direction || "CW",
+            speed_us: Number(s.speed_us) || 500,
+            duration: Number(s.duration) || 3.0,
+          };
+        }
         const step = { type: s.type, pos: s.pos.map(Number) };
         if (s.vel != null)
           step.vel =
@@ -375,6 +522,11 @@ function app() {
           body: JSON.stringify({ steps }),
         });
       } else {
+        if (!this.modalName.trim()) {
+          const now = new Date();
+          const pad = (n) => String(n).padStart(2, "0");
+          this.modalName = `plan_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+        }
         const r = await fetch("/api/plans", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -389,6 +541,7 @@ function app() {
       this.modalDirty = false;
       this.showUnsavedWarning = false;
       if (this.handGuideEnabled) await this.disableHandGuide();
+      await this._cleanupModalTurntable();
       this.selectedStepIndex = null;
       this.showPlanModal = false;
       await this.loadPlans();
@@ -400,6 +553,7 @@ function app() {
         this.showUnsavedWarning = true;
         return;
       }
+      await this._cleanupModalTurntable();
       this.selectedStepIndex = null;
       this.showPlanModal = false;
       this.showUnsavedWarning = false;
@@ -413,6 +567,7 @@ function app() {
     async confirmDiscard() {
       if (this.handGuideEnabled) this.disableHandGuide();
       fetch("/api/robot/hand_guide/points", { method: "DELETE" });
+      await this._cleanupModalTurntable();
       this.selectedStepIndex = null;
       this.modalDirty = false;
       this.showUnsavedWarning = false;
