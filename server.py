@@ -433,65 +433,25 @@ async def _run_plan_task(plan_name: str, plan_path: Path):
     if robot_buf:
         segments.append(("robot", robot_buf))
 
+    # Robot segs need --single-pass when turntable segs exist so they exit naturally
+    has_turntable_segs = any(s[0] == "turntable" for s in segments)
+    use_single_pass = has_turntable_segs
+    # Mixed and turntable-only plans loop at Python level; pure robot loops inside move_joint_node
+    should_loop = has_turntable_segs or not has_robot_steps
+
     t_start = time.monotonic()
-    loop = asyncio.get_event_loop()
     last_rc = 0
 
-    for seg_type, seg_data in segments:
-        if _stop_requested:
+    while True:
+        for seg_type, seg_data in segments:
+            if _stop_requested:
+                break
+            if seg_type == "robot":
+                last_rc = await _run_robot_segment(seg_data, plan_data, use_single_pass)
+            else:
+                await _run_turntable_segment(seg_data)
+        if _stop_requested or not should_loop:
             break
-
-        if seg_type == "robot":
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".json", delete=False, dir=str(PLANS_DIR)
-            ) as tf:
-                json.dump({
-                    "name": plan_data["name"],
-                    "created_at": plan_data.get("created_at", ""),
-                    "steps": seg_data,
-                }, tf)
-                tmp_path = tf.name
-            try:
-                _active_proc = subprocess.Popen(
-                    "source /opt/ros/humble/setup.bash && "
-                    "source ~/ros2_ws/install/setup.bash && "
-                    f"ros2 run lux_dsr_control move_joint_node --plan-file {tmp_path}",
-                    shell=True, executable="/bin/bash",
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    preexec_fn=os.setsid,
-                )
-                await _stream_proc(_active_proc)
-                last_rc = await loop.run_in_executor(None, _active_proc.wait)
-            finally:
-                _active_proc = None
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-
-        else:  # turntable
-            direction = seg_data.get("direction", "CW")
-            speed_us = int(seg_data.get("speed_us", 500))
-            duration = float(seg_data.get("duration", 1.0))
-
-            if _turntable is None or not _turntable.is_open:
-                await _broadcast("[WARN] Turntable not connected — skipping step\n")
-                continue
-
-            await _broadcast(f"Turntable: {direction} · {speed_us} μs · {duration:.1f}s\n")
-            try:
-                _turntable.write(b"ENABLE\n")
-                await asyncio.sleep(0.05)
-                _turntable.write(f"DIR:{direction}\n".encode())
-                await asyncio.sleep(0.05)
-                _turntable.write(f"SPEED:{speed_us}\n".encode())
-                elapsed = 0.0
-                while elapsed < duration and not _stop_requested:
-                    await asyncio.sleep(0.1)
-                    elapsed += 0.1
-                _turntable.write(b"DISABLE\n")
-            except Exception as e:
-                await _broadcast(f"[WARN] Turntable error: {e}\n")
 
     elapsed_total = time.monotonic() - t_start
     await _broadcast(f"[STAT] Finished in {elapsed_total:.1f}s\n")
@@ -499,15 +459,71 @@ async def _run_plan_task(plan_name: str, plan_path: Path):
     if _stop_requested:
         result = "success"
         _stop_requested = False
-    elif has_robot_steps:
-        result = "unknown" if last_rc < 0 else "fail"
     else:
-        result = "success"  # turntable-only: natural completion is expected
+        result = "unknown" if last_rc < 0 else "fail"
 
     _record_stat(plan_name, result)
     await _broadcast(f"[DONE] Plan '{plan_name}' finished — {result}\n")
     _active_proc = None
     _active_plan = None
+
+
+async def _run_robot_segment(seg_data: list, plan_data: dict, single_pass: bool) -> int:
+    global _active_proc
+    loop = asyncio.get_event_loop()
+    single_pass_flag = "--single-pass" if single_pass else ""
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json", delete=False, dir=str(PLANS_DIR)
+    ) as tf:
+        json.dump({
+            "name": plan_data["name"],
+            "created_at": plan_data.get("created_at", ""),
+            "steps": seg_data,
+        }, tf)
+        tmp_path = tf.name
+    try:
+        _active_proc = subprocess.Popen(
+            "source /opt/ros/humble/setup.bash && "
+            "source ~/ros2_ws/install/setup.bash && "
+            f"ros2 run lux_dsr_control move_joint_node --plan-file {tmp_path} {single_pass_flag}",
+            shell=True, executable="/bin/bash",
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            preexec_fn=os.setsid,
+        )
+        await _stream_proc(_active_proc)
+        return await loop.run_in_executor(None, _active_proc.wait)
+    finally:
+        _active_proc = None
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+async def _run_turntable_segment(seg_data: dict):
+    global _stop_requested
+    direction = seg_data.get("direction", "CW")
+    speed_us = int(seg_data.get("speed_us", 500))
+    duration = float(seg_data.get("duration", 1.0))
+
+    if _turntable is None or not _turntable.is_open:
+        await _broadcast("[WARN] Turntable not connected — skipping step\n")
+        return
+
+    await _broadcast(f"Turntable: {direction} · {speed_us} μs · {duration:.1f}s\n")
+    try:
+        _turntable.write(b"ENABLE\n")
+        await asyncio.sleep(0.05)
+        _turntable.write(f"DIR:{direction}\n".encode())
+        await asyncio.sleep(0.05)
+        _turntable.write(f"SPEED:{speed_us}\n".encode())
+        elapsed = 0.0
+        while elapsed < duration and not _stop_requested:
+            await asyncio.sleep(0.1)
+            elapsed += 0.1
+        _turntable.write(b"DISABLE\n")
+    except Exception as e:
+        await _broadcast(f"[WARN] Turntable error: {e}\n")
 
 @app.post("/api/robot/stop")
 async def robot_stop():
