@@ -322,7 +322,8 @@
               </thead>
               <tbody>
                 <template x-for="(step, i) in selected.steps" :key="i">
-                  <tr class="border-b border-chrome hover:bg-gray-50 transition-colors duration-100 last:border-0">
+                  <tr class="border-b border-chrome hover:bg-gray-50 transition-colors duration-100 last:border-0"
+                      :class="step.enabled === false ? 'opacity-40' : ''">
                     <td class="py-2.5 text-gray-400 text-xs font-mono" x-text="i + 1"></td>
                     <td class="py-2.5 pr-4">
                       <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium"
@@ -683,6 +684,21 @@
         <div x-show="planMode === 'turntable'"
              class="rounded-lg border border-chrome bg-surface-input p-4 space-y-5">
 
+          <!-- Parallel mode toggle -->
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-xs font-medium text-gray-700">Parallel mode</div>
+              <div class="text-[11px] text-dim mt-0.5" x-text="modalTtParallel ? 'Turntable runs alongside selected robot steps' : 'Turntable runs as sequential steps in the plan'"></div>
+            </div>
+            <button @click="toggleParallelMode()"
+                    class="focus-ring relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200"
+                    :class="modalTtParallel ? 'bg-accent-ui' : 'bg-gray-200'"
+                    role="switch" :aria-checked="modalTtParallel" aria-label="Parallel mode">
+              <span class="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform duration-200"
+                    :class="modalTtParallel ? 'translate-x-4' : 'translate-x-0'"></span>
+            </button>
+          </div>
+
           <!-- Connection status -->
           <div class="space-y-1">
             <div class="flex items-center gap-1.5 text-xs font-medium select-none"
@@ -766,8 +782,8 @@
             <span x-text="modalTtError"></span>
           </div>
 
-          <!-- Add step -->
-          <div class="border-t border-chrome pt-4 space-y-3">
+          <!-- Add step (sequential only) -->
+          <div x-show="!modalTtParallel" class="border-t border-chrome pt-4 space-y-3">
             <div>
               <label for="modal-tt-duration" class="block text-[11px] font-medium text-dim mb-1">Spin duration (seconds)</label>
               <input id="modal-tt-duration" type="number" min="0.1" step="0.1"
@@ -778,6 +794,11 @@
                     class="focus-ring w-full py-2.5 text-sm font-semibold rounded-lg border border-chrome-input bg-surface-raised hover:bg-btn text-gray-700 transition-colors duration-150">
               + Add Turntable Step
             </button>
+          </div>
+
+          <!-- Parallel mode note -->
+          <div x-show="modalTtParallel" class="border-t border-chrome pt-4">
+            <p class="text-[11px] text-dim">Use the eye toggle on each robot step below to select which steps run with turntable.</p>
           </div>
 
         </div>
@@ -832,6 +853,13 @@
           </div>
         </div>
 
+        <!-- Mode notice -->
+        <div x-show="modalTtParallel"
+             class="flex items-center gap-2 px-3 py-2 rounded-lg bg-teal-50 border border-teal-200 text-xs text-teal-700 dark:bg-teal-900/20 dark:border-teal-700/50 dark:text-teal-400">
+          <span class="font-medium">Parallel mode</span>
+          <span class="text-teal-500">— turntable runs alongside selected robot steps. Turntable steps disabled.</span>
+        </div>
+
         <!-- Unified steps list — visible in both modes -->
         <div>
           <div class="flex items-center justify-between mb-2.5">
@@ -853,9 +881,12 @@
           <div class="space-y-2" x-ref="stepsContainer">
             <template x-for="(step, i) in modalSteps" :key="i">
               <div class="step-row border rounded-lg p-3 transition-colors duration-150"
-                   :class="selectedStepIndex === i && planMode === 'handguide' && handGuideEnabled
-                     ? 'bg-indigo-50 border-indigo-300 ring-2 ring-indigo-200'
-                     : 'bg-gray-50 border-chrome'">
+                   :class="[
+                     selectedStepIndex === i && planMode === 'handguide' && handGuideEnabled
+                       ? 'bg-indigo-50 border-indigo-300 ring-2 ring-indigo-200'
+                       : 'bg-gray-50 border-chrome',
+                     step.enabled === false ? 'opacity-50' : ''
+                   ]">
                 <div class="flex items-center gap-2 mb-2.5">
                   <div class="drag-handle flex-shrink-0 text-gray-300 hover:text-gray-500 select-none px-0.5" aria-hidden="true">⠿</div>
                   <span class="text-xs text-gray-400 w-4 flex-shrink-0 font-mono" x-text="i + 1"></span>
@@ -863,7 +894,7 @@
                           class="focus-ring bg-surface-input border border-chrome-input rounded-md pl-2.5 pr-7 py-1 text-sm font-mono text-gray-900 transition-colors duration-150">
                     <option>MoveJ</option>
                     <option>MoveL</option>
-                    <option>Turntable</option>
+                    <option x-show="!modalTtParallel">Turntable</option>
                   </select>
                   <button x-show="planMode === 'handguide' && handGuideEnabled"
                           @click="selectStep(i)"
@@ -872,6 +903,22 @@
                           class="focus-ring text-xs px-2 py-0.5 rounded border transition-colors duration-150">
                     update
                   </button>
+                  <!-- with_turntable checkbox (parallel mode, robot steps only) -->
+                  <label x-show="modalTtParallel && step.type !== 'Turntable'"
+                         class="flex items-center gap-1 cursor-pointer select-none"
+                         :class="!step.enabled ? 'opacity-40 pointer-events-none' : ''"
+                         :title="'Run with turntable, step ' + (i + 1)">
+                    <input type="checkbox" x-model="step.with_turntable" @change="markDirty()"
+                           class="focus-ring rounded"
+                           :aria-label="'Run step ' + (i + 1) + ' with turntable'" />
+                    <span class="text-[11px] text-dim">↻</span>
+                  </label>
+                  <!-- Eye toggle (enabled/disabled) -->
+                  <button @click="toggleStepEnabled(i)"
+                          :aria-label="(step.enabled !== false ? 'Disable' : 'Enable') + ' step ' + (i + 1)"
+                          class="focus-ring px-1.5 py-0.5 rounded text-sm transition-colors duration-150 select-none"
+                          :class="step.enabled !== false ? 'text-gray-400 hover:text-gray-700' : 'text-gray-300 hover:text-gray-500'"
+                          x-text="step.enabled !== false ? '◉' : '○'"></button>
                   <button @click="removeStep(i)"
                           class="focus-ring ml-auto text-xs text-red-500 hover:text-red-700 px-2 py-0.5 rounded transition-colors duration-150">
                     Remove

@@ -194,13 +194,16 @@ async def _broadcast(msg: str):
     for ws in dead:
         _ws_clients.remove(ws)
 
-async def _stream_proc(proc: subprocess.Popen):
+async def _stream_proc(proc: subprocess.Popen, on_line=None):
     loop = asyncio.get_event_loop()
     while True:
         line = await loop.run_in_executor(None, proc.stdout.readline)
         if not line:
             break
-        await _broadcast(line.decode(errors="replace"))
+        text = line.decode(errors="replace")
+        await _broadcast(text)
+        if on_line:
+            await on_line(text)
 
 
 # ── routes ─────────────────────────────────────────────────────────────────
@@ -223,6 +226,7 @@ async def list_plans():
 class PlanBody(BaseModel):
     name: str
     steps: list
+    turntable_parallel: Optional[dict] = None
 
 @app.post("/api/plans")
 async def create_plan(body: PlanBody):
@@ -231,6 +235,8 @@ async def create_plan(body: PlanBody):
         raise HTTPException(400, "Plan already exists")
     steps = [_coerce_step_floats(s) for s in body.steps]
     data = {"name": body.name, "created_at": datetime.now().isoformat(timespec="seconds"), "steps": steps}
+    if body.turntable_parallel is not None:
+        data["turntable_parallel"] = body.turntable_parallel
     p.write_text(json.dumps(data, indent=2))
     return data
 
@@ -258,6 +264,7 @@ async def get_plan(name: str):
 
 class UpdateBody(BaseModel):
     steps: list
+    turntable_parallel: Optional[dict] = None
 
 @app.put("/api/plans/{name}")
 async def update_plan(name: str, body: UpdateBody):
@@ -266,6 +273,10 @@ async def update_plan(name: str, body: UpdateBody):
         raise HTTPException(404, "Not found")
     data = json.loads(p.read_text())
     data["steps"] = [_coerce_step_floats(s) for s in body.steps]
+    if body.turntable_parallel is not None:
+        data["turntable_parallel"] = body.turntable_parallel
+    else:
+        data.pop("turntable_parallel", None)
     p.write_text(json.dumps(data, indent=2))
     return data
 
@@ -420,24 +431,61 @@ async def _run_plan_task(plan_name: str, plan_path: Path):
 
             await _broadcast("[INFO] Build succeeded\n")
 
-    segments: list = []
-    robot_buf: list = []
-    for step in steps:
-        if step.get("type") == "Turntable":
-            if robot_buf:
-                segments.append(("robot", list(robot_buf)))
-                robot_buf = []
-            segments.append(("turntable", step))
-        else:
-            robot_buf.append(step)
-    if robot_buf:
-        segments.append(("robot", robot_buf))
+    # Filter disabled steps
+    active_steps = [s for s in steps if s.get("enabled", True)]
+    has_robot_steps = any(s.get("type") != "Turntable" for s in active_steps)
 
-    # Robot segs need --single-pass when turntable segs exist so they exit naturally
-    has_turntable_segs = any(s[0] == "turntable" for s in segments)
-    use_single_pass = has_turntable_segs
-    # Mixed and turntable-only plans loop at Python level; pure robot loops inside move_joint_node
-    should_loop = has_turntable_segs or not has_robot_steps
+    tt_parallel = plan_data.get("turntable_parallel")
+    is_parallel = tt_parallel is not None
+    tt_step_callback = None
+
+    if is_parallel:
+        # Parallel: one subprocess loops normally, turntable reacts to [STEP_START] events
+        segments = [("robot", active_steps)]
+        has_turntable_segs = False
+        use_single_pass = False
+        should_loop = False  # subprocess loops internally
+
+        with_tt = [s.get("with_turntable", False) for s in active_steps]
+
+        async def tt_step_callback(text):
+            if "[STEP_START]" not in text:
+                return
+            try:
+                idx = int(text.split("[STEP_START]")[1].strip().split()[0])
+            except (ValueError, IndexError):
+                return
+            if not (_turntable and _turntable.is_open):
+                return
+            try:
+                if idx < len(with_tt) and with_tt[idx]:
+                    _turntable.write(b"ENABLE\n")
+                    await asyncio.sleep(0.05)
+                    _turntable.write(f"DIR:{tt_parallel['direction']}\n".encode())
+                    await asyncio.sleep(0.05)
+                    _turntable.write(f"SPEED:{int(tt_parallel['speed_us'])}\n".encode())
+                else:
+                    _turntable.write(b"DISABLE\n")
+            except Exception as e:
+                await _broadcast(f"[WARN] Turntable error: {e}\n")
+    else:
+        # Sequential: split at Turntable step boundaries
+        segments = []
+        robot_buf: list = []
+        for step in active_steps:
+            if step.get("type") == "Turntable":
+                if robot_buf:
+                    segments.append(("robot", list(robot_buf)))
+                    robot_buf = []
+                segments.append(("turntable", step))
+            else:
+                robot_buf.append(step)
+        if robot_buf:
+            segments.append(("robot", robot_buf))
+
+        has_turntable_segs = any(s[0] == "turntable" for s in segments)
+        use_single_pass = has_turntable_segs
+        should_loop = has_turntable_segs or not has_robot_steps
 
     t_start = time.monotonic()
     last_rc = 0
@@ -447,11 +495,20 @@ async def _run_plan_task(plan_name: str, plan_path: Path):
             if _stop_requested:
                 break
             if seg_type == "robot":
-                last_rc = await _run_robot_segment(seg_data, plan_data, use_single_pass)
+                last_rc = await _run_robot_segment(
+                    seg_data, plan_data, use_single_pass, on_line=tt_step_callback
+                )
             else:
                 await _run_turntable_segment(seg_data)
         if _stop_requested or not should_loop:
             break
+
+    # Parallel mode: ensure turntable off after stop
+    if is_parallel and _turntable and _turntable.is_open:
+        try:
+            _turntable.write(b"DISABLE\n")
+        except Exception:
+            pass
 
     elapsed_total = time.monotonic() - t_start
     await _broadcast(f"[STAT] Finished in {elapsed_total:.1f}s\n")
@@ -468,7 +525,7 @@ async def _run_plan_task(plan_name: str, plan_path: Path):
     _active_plan = None
 
 
-async def _run_robot_segment(seg_data: list, plan_data: dict, single_pass: bool) -> int:
+async def _run_robot_segment(seg_data: list, plan_data: dict, single_pass: bool, on_line=None) -> int:
     global _active_proc
     loop = asyncio.get_event_loop()
     single_pass_flag = "--single-pass" if single_pass else ""
@@ -490,7 +547,7 @@ async def _run_robot_segment(seg_data: list, plan_data: dict, single_pass: bool)
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             preexec_fn=os.setsid,
         )
-        await _stream_proc(_active_proc)
+        await _stream_proc(_active_proc, on_line=on_line)
         return await loop.run_in_executor(None, _active_proc.wait)
     finally:
         _active_proc = None

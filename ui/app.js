@@ -38,6 +38,7 @@ function app() {
     modalTtActivated: false,
     modalTtError: "",
     modalTtLoading: false,
+    modalTtParallel: false,
     get modalTtSpeedDelay() {
       return Math.round(5 * Math.pow(1000, 1 - this.modalTtSpeedPct / 100));
     },
@@ -270,6 +271,12 @@ function app() {
       this._resetModalTt();
       fetch("/api/robot/hand_guide/points", { method: "DELETE" });
       this.modalName = this.selected.name;
+      const ttParallel = this.selected.turntable_parallel;
+      this.modalTtParallel = !!ttParallel;
+      if (ttParallel) {
+        this.modalTtDirection = ttParallel.direction || "CW";
+        this.modalTtSpeedPct = this._pctFromDelay(ttParallel.speed_us || 500);
+      }
       this.modalSteps = JSON.parse(JSON.stringify(this.selected.steps)).map((s) => {
         if (s.type === "Turntable") {
           return {
@@ -277,6 +284,7 @@ function app() {
             direction: s.direction || "CW",
             speed_us: s.speed_us || 500,
             duration: s.duration || 3.0,
+            enabled: s.enabled !== false,
           };
         }
         return {
@@ -285,6 +293,8 @@ function app() {
           vel: Array.isArray(s.vel) ? s.vel[0] : (s.vel ?? 30),
           acc: Array.isArray(s.acc) ? s.acc[0] : (s.acc ?? 30),
           time: s.time ?? 2,
+          enabled: s.enabled !== false,
+          with_turntable: s.with_turntable || false,
         };
       });
       this.showPlanModal = true;
@@ -302,6 +312,7 @@ function app() {
       this.modalTtActivated = false;
       this.modalTtError = "";
       this.modalTtLoading = false;
+      this.modalTtParallel = false;
     },
 
     async _cleanupModalTurntable() {
@@ -387,6 +398,7 @@ function app() {
         direction: this.modalTtDirection,
         speed_us: this.modalTtSpeedDelay,
         duration: Number(this.modalTtDuration) || 3.0,
+        enabled: true,
       });
       this.markDirty();
       this.$nextTick(() => {
@@ -406,6 +418,8 @@ function app() {
         vel: 30,
         acc: 30,
         time: 2,
+        enabled: true,
+        with_turntable: false,
       });
       this.modalDirty = true;
       this.$nextTick(() => {
@@ -427,6 +441,14 @@ function app() {
       this.markDirty();
     },
 
+    toggleParallelMode() {
+      this.modalTtParallel = !this.modalTtParallel;
+      if (this.modalTtParallel) {
+        this.modalSteps.forEach(s => { if (s.type === "Turntable") s.enabled = false; });
+      }
+      this.markDirty();
+    },
+
     onStepTypeChange(i, step) {
       if (step.type === "Turntable") {
         step.direction = this.modalTtDirection || "CW";
@@ -436,15 +458,22 @@ function app() {
         delete step.vel;
         delete step.acc;
         delete step.time;
+        delete step.with_turntable;
       } else {
         step.pos = [0, 0, 0, 0, 0, 0];
         step.vel = 30;
         step.acc = 30;
         step.time = 2;
+        step.with_turntable = false;
         delete step.direction;
         delete step.speed_us;
         delete step.duration;
       }
+      this.markDirty();
+    },
+
+    toggleStepEnabled(i) {
+      this.modalSteps[i].enabled = !this.modalSteps[i].enabled;
       this.markDirty();
     },
 
@@ -505,6 +534,7 @@ function app() {
             direction: s.direction || "CW",
             speed_us: Number(s.speed_us) || 500,
             duration: Number(s.duration) || 3.0,
+            enabled: s.enabled !== false,
           };
         }
         const step = { type: s.type, pos: s.pos.map(Number) };
@@ -515,14 +545,19 @@ function app() {
           step.acc =
             s.type === "MoveL" ? [Number(s.acc), Number(s.acc)] : Number(s.acc);
         if (s.time != null) step.time = Number(s.time);
+        step.enabled = s.enabled !== false;
+        if (this.modalTtParallel) step.with_turntable = s.with_turntable || false;
         return step;
       });
+      const extraPlanFields = this.modalTtParallel
+        ? { turntable_parallel: { direction: this.modalTtDirection, speed_us: this.modalTtSpeedDelay } }
+        : {};
 
       if (this.editMode) {
         await fetch(`/api/plans/${this.selected.name}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ steps }),
+          body: JSON.stringify({ steps, ...extraPlanFields }),
         });
       } else {
         if (!this.modalName.trim()) {
@@ -533,7 +568,7 @@ function app() {
         const r = await fetch("/api/plans", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: this.modalName, steps }),
+          body: JSON.stringify({ name: this.modalName, steps, ...extraPlanFields }),
         });
         if (!r.ok) {
           this.planModalError = (await r.json()).detail;
