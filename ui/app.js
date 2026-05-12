@@ -65,6 +65,7 @@ function app() {
     planModalError: "",
     modalDirty: false,
     showUnsavedWarning: false,
+    showTtRunningWarning: false,
     selectedStepIndex: null,
     sortableInstance: null,
 
@@ -249,6 +250,7 @@ function app() {
       this.planModalError = "";
       this.modalDirty = false;
       this.showUnsavedWarning = false;
+      this.showTtRunningWarning = false;
       this.selectedStepIndex = null;
       this._resetModalTt();
       fetch("/api/robot/hand_guide/points", { method: "DELETE" });
@@ -263,6 +265,7 @@ function app() {
       this.planModalError = "";
       this.modalDirty = false;
       this.showUnsavedWarning = false;
+      this.showTtRunningWarning = false;
       this.selectedStepIndex = null;
       this._resetModalTt();
       fetch("/api/robot/hand_guide/points", { method: "DELETE" });
@@ -549,6 +552,10 @@ function app() {
 
     async closePlanModal() {
       if (this.handGuideEnabled) await this.disableHandGuide();
+      if (this.modalTtActivated && this.ttEnabled) {
+        this.showTtRunningWarning = true;
+        return;
+      }
       if (this.modalDirty) {
         this.showUnsavedWarning = true;
         return;
@@ -557,6 +564,21 @@ function app() {
       this.selectedStepIndex = null;
       this.showPlanModal = false;
       this.showUnsavedWarning = false;
+    },
+
+    addTtStepAndContinueClose() {
+      this.addTurntableStep();
+      this.showTtRunningWarning = false;
+      this.showUnsavedWarning = true;
+    },
+
+    async closeTtWarningDiscard() {
+      this.showTtRunningWarning = false;
+      this.modalDirty = false;
+      this.showUnsavedWarning = false;
+      await this._cleanupModalTurntable();
+      this.selectedStepIndex = null;
+      this.showPlanModal = false;
     },
 
     async saveAndClose() {

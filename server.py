@@ -377,46 +377,48 @@ async def robot_start(body: StartBody):
 async def _run_plan_task(plan_name: str, plan_path: Path):
     global _active_proc, _active_plan, _build_proc, _stop_requested
 
-    # Check if the package is already built
-    await _broadcast("[STEP] Checking lux_dsr_control package...\n")
-    check = await asyncio.create_subprocess_shell(
-        "source /opt/ros/humble/setup.bash && "
-        "source ~/ros2_ws/install/setup.bash && "
-        "ros2 pkg list 2>/dev/null | grep -q lux_dsr_control",
-        executable="/bin/bash",
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
-    pkg_found = (await check.wait()) == 0
-
-    if not pkg_found:
-        await _broadcast("[STEP] Building lux_dsr_control...\n")
-        build = await asyncio.create_subprocess_shell(
-            "source /opt/ros/humble/setup.bash && "
-            "cd ~/ros2_ws && "
-            "colcon build --packages-select lux_dsr_control --symlink-install 2>&1",
-            executable="/bin/bash",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        _build_proc = build
-        async for chunk in build.stdout:
-            await _broadcast(chunk.decode(errors="replace"))
-        build_rc = await build.wait()
-        _build_proc = None
-
-        if build_rc != 0:
-            label = "Build cancelled" if build_rc < 0 else f"Build failed (exit {build_rc})"
-            await _broadcast(f"[ERROR] {label}\n")
-            await _broadcast(f"[DONE] Plan '{plan_name}' aborted — build error\n")
-            _active_plan = None
-            return
-
-        await _broadcast("[INFO] Build succeeded\n")
-
-    # Split plan into robot/turntable segments
+    # Load plan early to check if any robot steps require ROS
     plan_data = json.loads(plan_path.read_text())
     steps = plan_data.get("steps", [])
+    has_robot_steps = any(s.get("type") != "Turntable" for s in steps)
+
+    if has_robot_steps:
+        # Check if the package is already built
+        await _broadcast("[STEP] Checking lux_dsr_control package...\n")
+        check = await asyncio.create_subprocess_shell(
+            "source /opt/ros/humble/setup.bash && "
+            "source ~/ros2_ws/install/setup.bash && "
+            "ros2 pkg list 2>/dev/null | grep -q lux_dsr_control",
+            executable="/bin/bash",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        pkg_found = (await check.wait()) == 0
+
+        if not pkg_found:
+            await _broadcast("[STEP] Building lux_dsr_control...\n")
+            build = await asyncio.create_subprocess_shell(
+                "source /opt/ros/humble/setup.bash && "
+                "cd ~/ros2_ws && "
+                "colcon build --packages-select lux_dsr_control --symlink-install 2>&1",
+                executable="/bin/bash",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+            _build_proc = build
+            async for chunk in build.stdout:
+                await _broadcast(chunk.decode(errors="replace"))
+            build_rc = await build.wait()
+            _build_proc = None
+
+            if build_rc != 0:
+                label = "Build cancelled" if build_rc < 0 else f"Build failed (exit {build_rc})"
+                await _broadcast(f"[ERROR] {label}\n")
+                await _broadcast(f"[DONE] Plan '{plan_name}' aborted — build error\n")
+                _active_plan = None
+                return
+
+            await _broadcast("[INFO] Build succeeded\n")
 
     segments: list = []
     robot_buf: list = []
