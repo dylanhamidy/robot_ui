@@ -443,9 +443,9 @@ function app() {
 
     toggleParallelMode() {
       this.modalTtParallel = !this.modalTtParallel;
-      if (this.modalTtParallel) {
-        this.modalSteps.forEach(s => { if (s.type === "Turntable") s.enabled = false; });
-      }
+      this.modalSteps.forEach(s => {
+        if (s.type === "Turntable") s.enabled = !this.modalTtParallel;
+      });
       this.markDirty();
     },
 
