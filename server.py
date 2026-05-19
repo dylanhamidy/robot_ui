@@ -29,6 +29,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 BASE = Path(__file__).parent
+ROS2_WS_INSTALL = os.environ.get("ROS2_WS_INSTALL", str(Path.home() / "ros2_ws" / "install"))
+SKIP_AUTO_BUILD = os.environ.get("ROBOT_UI_SKIP_BUILD", "0") == "1"
 PLANS_DIR = BASE / "plans"
 STATS_DIR = BASE / "stats"
 PLANS_DIR.mkdir(exist_ok=True)
@@ -316,23 +318,24 @@ async def robot_connect(body: ConnectBody):
 
     try:
         # Step 0: ensure the ROS workspace is built
-        await _broadcast("\n[STEP] Checking robot workspace...\n")
-        ws_setup = Path.home() / "ros2_ws" / "install" / "setup.bash"
-        if not ws_setup.exists():
-            await _broadcast("[STEP] Building robot workspace...\n")
-            build = await asyncio.create_subprocess_shell(
-                "source /opt/ros/humble/setup.bash && "
-                "cd ~/ros2_ws && "
-                "colcon build --packages-select lux_dsr_control --symlink-install 2>&1",
-                executable="/bin/bash",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            async for chunk in build.stdout:
-                await _broadcast(chunk.decode(errors="replace"))
-            build_rc = await build.wait()
-            if build_rc != 0:
-                raise RuntimeError(f"Workspace build failed (exit {build_rc})")
+        if not SKIP_AUTO_BUILD:
+            await _broadcast("\n[STEP] Checking robot workspace...\n")
+            ws_setup = Path(ROS2_WS_INSTALL) / "setup.bash"
+            if not ws_setup.exists():
+                await _broadcast("[STEP] Building robot workspace...\n")
+                build = await asyncio.create_subprocess_shell(
+                    "source /opt/ros/humble/setup.bash && "
+                    f"cd {str(Path(ROS2_WS_INSTALL).parent)} && "
+                    "colcon build --packages-select lux_dsr_control --symlink-install 2>&1",
+                    executable="/bin/bash",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                )
+                async for chunk in build.stdout:
+                    await _broadcast(chunk.decode(errors="replace"))
+                build_rc = await build.wait()
+                if build_rc != 0:
+                    raise RuntimeError(f"Workspace build failed (exit {build_rc})")
         await _broadcast("[INFO] Workspace ready\n")
 
         await run_step(
@@ -346,7 +349,7 @@ async def robot_connect(body: ConnectBody):
         await _broadcast("\n[STEP] Launching RViz in real mode...\n")
         _rviz_proc = subprocess.Popen(
             "source /opt/ros/humble/setup.bash && "
-            "source ~/ros2_ws/install/setup.bash && "
+            f"source {ROS2_WS_INSTALL}/setup.bash && "
             "ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py "
             "mode:=real host:=192.168.0.20 port:=12345 model:=a0912",
             shell=True, executable="/bin/bash",
@@ -356,7 +359,7 @@ async def robot_connect(body: ConnectBody):
         await _broadcast("[INFO] RViz launching in background\n")
         _capture_proc = subprocess.Popen(
             "source /opt/ros/humble/setup.bash && "
-            "source ~/ros2_ws/install/setup.bash && "
+            f"source {ROS2_WS_INSTALL}/setup.bash && "
             "ros2 run lux_dsr_control pose_capture_node",
             shell=True, executable="/bin/bash",
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -393,12 +396,12 @@ async def _run_plan_task(plan_name: str, plan_path: Path):
     steps = plan_data.get("steps", [])
     has_robot_steps = any(s.get("type") != "Turntable" for s in steps)
 
-    if has_robot_steps:
+    if has_robot_steps and not SKIP_AUTO_BUILD:
         # Check if the package is already built
         await _broadcast("[STEP] Checking lux_dsr_control package...\n")
         check = await asyncio.create_subprocess_shell(
             "source /opt/ros/humble/setup.bash && "
-            "source ~/ros2_ws/install/setup.bash && "
+            f"source {ROS2_WS_INSTALL}/setup.bash && "
             "ros2 pkg list 2>/dev/null | grep -q lux_dsr_control",
             executable="/bin/bash",
             stdout=asyncio.subprocess.DEVNULL,
@@ -410,7 +413,7 @@ async def _run_plan_task(plan_name: str, plan_path: Path):
             await _broadcast("[STEP] Building lux_dsr_control...\n")
             build = await asyncio.create_subprocess_shell(
                 "source /opt/ros/humble/setup.bash && "
-                "cd ~/ros2_ws && "
+                f"cd {str(Path(ROS2_WS_INSTALL).parent)} && "
                 "colcon build --packages-select lux_dsr_control --symlink-install 2>&1",
                 executable="/bin/bash",
                 stdout=asyncio.subprocess.PIPE,
@@ -541,7 +544,7 @@ async def _run_robot_segment(seg_data: list, plan_data: dict, single_pass: bool,
     try:
         _active_proc = subprocess.Popen(
             "source /opt/ros/humble/setup.bash && "
-            "source ~/ros2_ws/install/setup.bash && "
+            f"source {ROS2_WS_INSTALL}/setup.bash && "
             f"ros2 run lux_dsr_control move_joint_node --plan-file {tmp_path} {single_pass_flag}",
             shell=True, executable="/bin/bash",
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -638,7 +641,7 @@ async def robot_status():
 
 ROS_ENV = (
     "source /opt/ros/humble/setup.bash && "
-    "source ~/ros2_ws/install/setup.bash && "
+    f"source {ROS2_WS_INSTALL}/setup.bash && "
 )
 
 async def _ros_call(cmd: str) -> bool:
