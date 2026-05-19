@@ -1,10 +1,11 @@
 # ── Stage 1: Build ROS2 + Doosan DSR + lux_dsr_control ───────────────────
 FROM osrf/ros:humble-desktop AS ros2-deps
 
-RUN apt-get update && apt-get install -y curl gnupg2 \
+RUN rm -f /etc/apt/sources.list.d/ros2-latest.list \
+    && apt-get update && apt-get install -y curl gnupg2 \
     && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc \
        | gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu jammy main" \
        > /etc/apt/sources.list.d/ros2.list \
     && apt-get update && apt-get install -y \
     python3-colcon-common-extensions \
@@ -55,10 +56,11 @@ RUN python -m nuitka \
 # ── Stage 3: Runtime image ────────────────────────────────────────────────
 FROM osrf/ros:humble-desktop
 
-RUN apt-get update && apt-get install -y curl gnupg2 \
+RUN rm -f /etc/apt/sources.list.d/ros2-latest.list \
+    && apt-get update && apt-get install -y curl gnupg2 \
     && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc \
        | gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu jammy main" \
        > /etc/apt/sources.list.d/ros2.list \
     && apt-get update \
     && rm -rf /var/lib/apt/lists/*
