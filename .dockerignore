@@ -8,8 +8,6 @@ __pycache__/
 plans/
 stats/
 dist/
-ui_dist/
-lux_dsr_control/
 docs/
 build/
 *.json
