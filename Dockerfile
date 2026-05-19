@@ -25,7 +25,7 @@ RUN apt-get update && \
     . /opt/ros/humble/setup.sh && \
     rosdep update && \
     rosdep install --from-paths src --ignore-src -r -y && \
-    colcon build --packages-up-to lux_dsr_control dsr_bringup2 && \
+    colcon build --packages-up-to lux_dsr_control dsr_bringup2 dsr_description2 dsr_controller2 dsr_hardware2 && \
     rm -rf build log src /var/lib/apt/lists/*
 
 # ── Stage 2: Compile server.py with Nuitka ───────────────────────────────
@@ -68,6 +68,13 @@ RUN rm -f /etc/apt/sources.list.d/ros2-latest.list \
     iputils-ping \
     sudo \
     python3-pip \
+    ros-humble-xacro \
+    ros-humble-ros2-control \
+    ros-humble-ros2-controllers \
+    libpocofoundation80 \
+    libpoconet80 \
+    libpocoutil80 \
+    libpocoxml80 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ros2-deps /ros2_ws/install /ros2_ws/install

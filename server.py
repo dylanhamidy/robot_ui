@@ -28,7 +28,12 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import sys
+# Nuitka --onefile extracts to a temp dir; __file__ points there instead of /app.
+# Fall back to the binary's own directory so ui/, plans/, stats/ are found correctly.
 BASE = Path(__file__).parent
+if not (BASE / "ui").exists():
+    BASE = Path(sys.argv[0]).resolve().parent
 ROS2_WS_INSTALL = os.environ.get("ROS2_WS_INSTALL", str(Path.home() / "ros2_ws" / "install"))
 SKIP_AUTO_BUILD = os.environ.get("ROBOT_UI_SKIP_BUILD", "0") == "1"
 PLANS_DIR = BASE / "plans"
