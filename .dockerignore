@@ -1,0 +1,16 @@
+.venv/
+.vscode/
+.claude/
+.agents
+__pycache__/
+*.pyc
+*.md
+plans/
+stats/
+dist/
+ui_dist/
+lux_dsr_control/
+docs/
+build/
+*.json
+*.ino

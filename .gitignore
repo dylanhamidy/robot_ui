@@ -9,3 +9,6 @@ skills-lock.json
 __pycache__/
 *.pyc
 progress.md
+lux_dsr_control/
+ui_dist/
+dist/
