@@ -21,11 +21,12 @@ COPY lux_dsr_control ./lux_dsr_control
 
 WORKDIR /ros2_ws
 
-RUN . /opt/ros/humble/setup.sh && \
+RUN apt-get update && \
+    . /opt/ros/humble/setup.sh && \
     rosdep update && \
     rosdep install --from-paths src --ignore-src -r -y && \
     colcon build --packages-select lux_dsr_control && \
-    rm -rf build log src
+    rm -rf build log src /var/lib/apt/lists/*
 
 # ── Stage 2: Compile server.py with Nuitka ───────────────────────────────
 FROM python:3.11-slim AS compiler
