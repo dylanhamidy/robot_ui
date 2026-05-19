@@ -5,7 +5,7 @@ VERSION=${1:-"1.0.0"}
 IMAGE="luxolis/robot_ui:${VERSION}"
 
 # Copy lux_dsr_control into build context
-cp -r ~/ros2_ws/src/lux_dsr_control ./lux_dsr_control
+cp -r ~/ros2_ws/src/doosan-robot-guides/lux_dsr_control ./lux_dsr_control
 
 # Minify JS + HTML
 bash build/minify.sh
