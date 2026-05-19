@@ -25,11 +25,11 @@ RUN apt-get update && \
     . /opt/ros/humble/setup.sh && \
     rosdep update && \
     rosdep install --from-paths src --ignore-src -r -y && \
-    colcon build --packages-select lux_dsr_control && \
+    colcon build --packages-up-to lux_dsr_control dsr_bringup2 && \
     rm -rf build log src /var/lib/apt/lists/*
 
 # ── Stage 2: Compile server.py with Nuitka ───────────────────────────────
-FROM python:3.11-slim AS compiler
+FROM python:3.11-slim-bullseye AS compiler
 
 RUN apt-get update && apt-get install -y \
     gcc \
@@ -63,7 +63,11 @@ RUN rm -f /etc/apt/sources.list.d/ros2-latest.list \
        | gpg --dearmor -o /usr/share/keyrings/ros-archive-keyring.gpg \
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu jammy main" \
        > /etc/apt/sources.list.d/ros2.list \
-    && apt-get update \
+    && apt-get update && apt-get install -y \
+    iproute2 \
+    iputils-ping \
+    sudo \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ros2-deps /ros2_ws/install /ros2_ws/install

@@ -34,6 +34,12 @@ xhost +local:docker 2>/dev/null || true
 # ── Step 5: Start container ───────────────────────────────────────────────
 docker rm -f robot_ui 2>/dev/null || true
 
+# Pass through any Arduino USB serial devices
+DEVICE_FLAGS=""
+for dev in /dev/ttyACM* /dev/ttyUSB*; do
+    [ -e "$dev" ] && DEVICE_FLAGS="$DEVICE_FLAGS --device $dev"
+done
+
 docker run -d \
     --name robot_ui \
     --net=host \
@@ -42,6 +48,8 @@ docker run -d \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
     -v "${DATA_DIR}/plans":/app/plans \
     -v "${DATA_DIR}/stats":/app/stats \
+    --group-add dialout \
+    $DEVICE_FLAGS \
     --restart unless-stopped \
     "${IMAGE}"
 
