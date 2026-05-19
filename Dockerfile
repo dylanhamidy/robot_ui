@@ -1,7 +1,9 @@
 # ── Stage 1: Build ROS2 + Doosan DSR + lux_dsr_control ───────────────────
 FROM osrf/ros:humble-desktop AS ros2-deps
 
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y curl \
+    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | apt-key add - \
+    && apt-get update && apt-get install -y \
     python3-colcon-common-extensions \
     python3-rosdep \
     git \
@@ -49,6 +51,11 @@ RUN python -m nuitka \
 
 # ── Stage 3: Runtime image ────────────────────────────────────────────────
 FROM osrf/ros:humble-desktop
+
+RUN apt-get update && apt-get install -y curl \
+    && curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.asc | apt-key add - \
+    && apt-get update \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ros2-deps /ros2_ws/install /ros2_ws/install
 COPY --from=compiler /build/robot_ui /app/robot_ui
