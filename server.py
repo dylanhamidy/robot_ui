@@ -36,6 +36,9 @@ if not (BASE / "ui").exists():
     BASE = Path(sys.argv[0]).resolve().parent
 ROS2_WS_INSTALL = os.environ.get("ROS2_WS_INSTALL", str(Path.home() / "ros2_ws" / "install"))
 SKIP_AUTO_BUILD = os.environ.get("ROBOT_UI_SKIP_BUILD", "0") == "1"
+ROBOT_IP = os.environ.get("ROBOT_IP", "192.168.0.20")
+PC_IP = os.environ.get("PC_IP", "192.168.0.50")
+ROBOT_MODEL = os.environ.get("ROBOT_MODEL", "a0912")
 PLANS_DIR = BASE / "plans"
 STATS_DIR = BASE / "stats"
 PLANS_DIR.mkdir(exist_ok=True)
@@ -346,17 +349,17 @@ async def robot_connect(body: ConnectBody):
         await run_step(
             f"echo '{pw}' | sudo -S ip addr flush dev {iface} && "
             f"echo '{pw}' | sudo -S ip link set {iface} up && "
-            f"echo '{pw}' | sudo -S ip addr add 192.168.0.50/24 dev {iface}",
+            f"echo '{pw}' | sudo -S ip addr add {PC_IP}/24 dev {iface}",
             "Configuring PC IP address"
         )
-        await run_step("ping -c 4 192.168.0.20", "Pinging robot at 192.168.0.20")
+        await run_step(f"ping -c 4 {ROBOT_IP}", f"Pinging robot at {ROBOT_IP}")
         # Step 3 runs in background - launch RViz
         await _broadcast("\n[STEP] Launching RViz in real mode...\n")
         _rviz_proc = subprocess.Popen(
             "source /opt/ros/humble/setup.bash && "
             f"source {ROS2_WS_INSTALL}/setup.bash && "
             "ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py "
-            "mode:=real host:=192.168.0.20 port:=12345 model:=a0912",
+            f"mode:=real host:={ROBOT_IP} port:=12345 model:={ROBOT_MODEL}",
             shell=True, executable="/bin/bash",
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             preexec_fn=os.setsid
