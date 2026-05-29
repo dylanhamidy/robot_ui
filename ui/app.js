@@ -39,6 +39,7 @@ function app() {
     modalTtError: "",
     modalTtLoading: false,
     modalTtParallel: false,
+    modalLoop: false,
     get modalTtSpeedDelay() {
       return Math.round(5 * Math.pow(1000, 1 - this.modalTtSpeedPct / 100));
     },
@@ -271,6 +272,7 @@ function app() {
       this._resetModalTt();
       fetch("/api/robot/hand_guide/points", { method: "DELETE" });
       this.modalName = this.selected.name;
+      this.modalLoop = this.selected.loop === true;
       const ttParallel = this.selected.turntable_parallel;
       this.modalTtParallel = !!ttParallel;
       if (ttParallel) {
@@ -284,6 +286,14 @@ function app() {
             direction: s.direction || "CW",
             speed_us: s.speed_us || 500,
             duration: s.duration || 3.0,
+            with_laser: s.with_laser || false,
+            enabled: s.enabled !== false,
+          };
+        }
+        if (s.type === "Laser") {
+          return {
+            type: "Laser",
+            duration: s.duration || 1.0,
             enabled: s.enabled !== false,
           };
         }
@@ -293,6 +303,9 @@ function app() {
           vel: Array.isArray(s.vel) ? s.vel[0] : (s.vel ?? 30),
           acc: Array.isArray(s.acc) ? s.acc[0] : (s.acc ?? 30),
           time: s.time ?? 2,
+          delay: s.delay ?? 0,
+          laser_delay: s.laser_delay ?? 0,
+          with_laser: s.with_laser || false,
           enabled: s.enabled !== false,
           with_turntable: s.with_turntable || false,
         };
@@ -313,6 +326,7 @@ function app() {
       this.modalTtError = "";
       this.modalTtLoading = false;
       this.modalTtParallel = false;
+      this.modalLoop = false;
     },
 
     async _cleanupModalTurntable() {
@@ -398,6 +412,20 @@ function app() {
         direction: this.modalTtDirection,
         speed_us: this.modalTtSpeedDelay,
         duration: Number(this.modalTtDuration) || 3.0,
+        with_laser: false,
+        enabled: true,
+      });
+      this.markDirty();
+      this.$nextTick(() => {
+        const last = this.$refs.stepsContainer?.lastElementChild;
+        if (last) last.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    },
+
+    addLaserStep() {
+      this.modalSteps.push({
+        type: "Laser",
+        duration: Number(this.modalTtDuration) || 1.0,
         enabled: true,
       });
       this.markDirty();
@@ -418,6 +446,9 @@ function app() {
         vel: 30,
         acc: 30,
         time: 2,
+        delay: 0,
+        laser_delay: 0,
+        with_laser: false,
         enabled: true,
         with_turntable: false,
       });
@@ -534,6 +565,14 @@ function app() {
             direction: s.direction || "CW",
             speed_us: Number(s.speed_us) || 500,
             duration: Number(s.duration) || 3.0,
+            with_laser: s.with_laser || false,
+            enabled: s.enabled !== false,
+          };
+        }
+        if (s.type === "Laser") {
+          return {
+            type: "Laser",
+            duration: Number(s.duration) || 1.0,
             enabled: s.enabled !== false,
           };
         }
@@ -545,13 +584,17 @@ function app() {
           step.acc =
             s.type === "MoveL" ? [Number(s.acc), Number(s.acc)] : Number(s.acc);
         if (s.time != null) step.time = Number(s.time);
+        if (s.delay != null && s.delay > 0) step.delay = Number(s.delay);
+        if (s.laser_delay != null && s.laser_delay > 0) step.laser_delay = Number(s.laser_delay);
+        step.with_laser = s.with_laser || false;
         step.enabled = s.enabled !== false;
         if (this.modalTtParallel) step.with_turntable = s.with_turntable || false;
         return step;
       });
-      const extraPlanFields = this.modalTtParallel
-        ? { turntable_parallel: { direction: this.modalTtDirection, speed_us: this.modalTtSpeedDelay } }
-        : {};
+      const extraPlanFields = {
+        loop: this.modalLoop,
+        ...(this.modalTtParallel ? { turntable_parallel: { direction: this.modalTtDirection, speed_us: this.modalTtSpeedDelay } } : {}),
+      };
 
       if (this.editMode) {
         await fetch(`/api/plans/${this.selected.name}`, {

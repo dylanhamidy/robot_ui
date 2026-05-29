@@ -39,6 +39,7 @@ SKIP_AUTO_BUILD = os.environ.get("ROBOT_UI_SKIP_BUILD", "0") == "1"
 ROBOT_IP = os.environ.get("ROBOT_IP", "192.168.0.20")
 PC_IP = os.environ.get("PC_IP", "192.168.0.50")
 ROBOT_MODEL = os.environ.get("ROBOT_MODEL", "a0912")
+ROBOT_MODE = os.environ.get("ROBOT_MODE", "real")  # "real" or "virtual"
 PLANS_DIR = BASE / "plans"
 STATS_DIR = BASE / "stats"
 PLANS_DIR.mkdir(exist_ok=True)
@@ -162,11 +163,13 @@ def _stats_path(name: str) -> Path:
 
 def _coerce_step_floats(step: dict) -> dict:
     """Ensure all numeric fields in a step are stored as the correct Python types."""
-    if step.get("type") == "Turntable":
+    if step.get("type") in ("Turntable", "Laser"):
         if "speed_us" in step:
             step["speed_us"] = int(step["speed_us"])
         if "duration" in step:
             step["duration"] = float(step["duration"])
+        if "with_laser" in step:
+            step["with_laser"] = bool(step["with_laser"])
         return step
     if "pos" in step:
         step["pos"] = [float(v) for v in step["pos"]]
@@ -176,6 +179,12 @@ def _coerce_step_floats(step: dict) -> dict:
             step[key] = [float(x) for x in v] if isinstance(v, list) else float(v)
     if "time" in step:
         step["time"] = float(step["time"])
+    if "delay" in step:
+        step["delay"] = float(step["delay"])
+    if "laser_delay" in step:
+        step["laser_delay"] = float(step["laser_delay"])
+    if "with_laser" in step:
+        step["with_laser"] = bool(step["with_laser"])
     return step
 
 def _load_stats(name: str) -> dict:
@@ -236,6 +245,7 @@ async def list_plans():
 class PlanBody(BaseModel):
     name: str
     steps: list
+    loop: bool = False
     turntable_parallel: Optional[dict] = None
 
 @app.post("/api/plans")
@@ -244,7 +254,7 @@ async def create_plan(body: PlanBody):
     if p.exists():
         raise HTTPException(400, "Plan already exists")
     steps = [_coerce_step_floats(s) for s in body.steps]
-    data = {"name": body.name, "created_at": datetime.now().isoformat(timespec="seconds"), "steps": steps}
+    data = {"name": body.name, "created_at": datetime.now().isoformat(timespec="seconds"), "steps": steps, "loop": body.loop}
     if body.turntable_parallel is not None:
         data["turntable_parallel"] = body.turntable_parallel
     p.write_text(json.dumps(data, indent=2))
@@ -274,6 +284,7 @@ async def get_plan(name: str):
 
 class UpdateBody(BaseModel):
     steps: list
+    loop: bool = False
     turntable_parallel: Optional[dict] = None
 
 @app.put("/api/plans/{name}")
@@ -283,6 +294,7 @@ async def update_plan(name: str, body: UpdateBody):
         raise HTTPException(404, "Not found")
     data = json.loads(p.read_text())
     data["steps"] = [_coerce_step_floats(s) for s in body.steps]
+    data["loop"] = body.loop
     if body.turntable_parallel is not None:
         data["turntable_parallel"] = body.turntable_parallel
     else:
@@ -346,24 +358,39 @@ async def robot_connect(body: ConnectBody):
                     raise RuntimeError(f"Workspace build failed (exit {build_rc})")
         await _broadcast("[INFO] Workspace ready\n")
 
-        await run_step(
-            f"echo '{pw}' | sudo -S ip addr flush dev {iface} && "
-            f"echo '{pw}' | sudo -S ip link set {iface} up && "
-            f"echo '{pw}' | sudo -S ip addr add {PC_IP}/24 dev {iface}",
-            "Configuring PC IP address"
-        )
-        await run_step(f"ping -c 4 {ROBOT_IP}", f"Pinging robot at {ROBOT_IP}")
-        # Step 3 runs in background - launch RViz
-        await _broadcast("\n[STEP] Launching RViz in real mode...\n")
-        _rviz_proc = subprocess.Popen(
-            "source /opt/ros/humble/setup.bash && "
-            f"source {ROS2_WS_INSTALL}/setup.bash && "
-            "ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py "
-            f"mode:=real host:={ROBOT_IP} port:=12345 model:={ROBOT_MODEL}",
-            shell=True, executable="/bin/bash",
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            preexec_fn=os.setsid
-        )
+        if ROBOT_MODE == "virtual":
+            await _broadcast("\n[STEP] Configuring PC IP address\n")
+            await _broadcast("[INFO] Virtual mode — skipping network setup\n")
+            await _broadcast("\n[STEP] Pinging robot at virtual\n")
+            await _broadcast("[INFO] Virtual mode — skipping ping\n")
+            await _broadcast("\n[STEP] Launching RViz in virtual mode...\n")
+            _rviz_proc = subprocess.Popen(
+                "source /opt/ros/humble/setup.bash && "
+                f"source {ROS2_WS_INSTALL}/setup.bash && "
+                "ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py "
+                f"mode:=virtual model:={ROBOT_MODEL}",
+                shell=True, executable="/bin/bash",
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid
+            )
+        else:
+            await run_step(
+                f"echo '{pw}' | sudo -S ip addr flush dev {iface} && "
+                f"echo '{pw}' | sudo -S ip link set {iface} up && "
+                f"echo '{pw}' | sudo -S ip addr add {PC_IP}/24 dev {iface}",
+                "Configuring PC IP address"
+            )
+            await run_step(f"ping -c 4 {ROBOT_IP}", f"Pinging robot at {ROBOT_IP}")
+            await _broadcast("\n[STEP] Launching RViz in real mode...\n")
+            _rviz_proc = subprocess.Popen(
+                "source /opt/ros/humble/setup.bash && "
+                f"source {ROS2_WS_INSTALL}/setup.bash && "
+                "ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py "
+                f"mode:=real host:={ROBOT_IP} port:=12345 model:={ROBOT_MODEL}",
+                shell=True, executable="/bin/bash",
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                preexec_fn=os.setsid
+            )
         await _broadcast("[INFO] RViz launching in background\n")
         _capture_proc = subprocess.Popen(
             "source /opt/ros/humble/setup.bash && "
@@ -402,7 +429,7 @@ async def _run_plan_task(plan_name: str, plan_path: Path):
     # Load plan early to check if any robot steps require ROS
     plan_data = json.loads(plan_path.read_text())
     steps = plan_data.get("steps", [])
-    has_robot_steps = any(s.get("type") != "Turntable" for s in steps)
+    has_robot_steps = any(s.get("type") not in ("Turntable", "Laser") for s in steps)
 
     if has_robot_steps and not SKIP_AUTO_BUILD:
         # Check if the package is already built
@@ -444,7 +471,7 @@ async def _run_plan_task(plan_name: str, plan_path: Path):
 
     # Filter disabled steps
     active_steps = [s for s in steps if s.get("enabled", True)]
-    has_robot_steps = any(s.get("type") != "Turntable" for s in active_steps)
+    has_robot_steps = any(s.get("type") not in ("Turntable", "Laser") for s in active_steps)
 
     tt_parallel = plan_data.get("turntable_parallel")
     is_parallel = tt_parallel is not None
@@ -452,10 +479,7 @@ async def _run_plan_task(plan_name: str, plan_path: Path):
 
     if is_parallel:
         # Parallel: one subprocess loops normally, turntable reacts to [STEP_START] events
-        segments = [("robot", active_steps)]
-        has_turntable_segs = False
-        use_single_pass = False
-        should_loop = False  # subprocess loops internally
+        use_single_pass = not plan_data.get("loop", False)
 
         with_tt = [s.get("with_turntable", False) for s in active_steps]
 
@@ -480,39 +504,78 @@ async def _run_plan_task(plan_name: str, plan_path: Path):
             except Exception as e:
                 await _broadcast(f"[WARN] Turntable error: {e}\n")
     else:
-        # Sequential: split at Turntable step boundaries
-        segments = []
-        robot_buf: list = []
-        for step in active_steps:
-            if step.get("type") == "Turntable":
-                if robot_buf:
-                    segments.append(("robot", list(robot_buf)))
-                    robot_buf = []
-                segments.append(("turntable", step))
-            else:
-                robot_buf.append(step)
-        if robot_buf:
-            segments.append(("robot", robot_buf))
+        # Sequential: node handles all steps; signals [WAIT] for Turntable/Laser steps
+        should_loop = plan_data.get("loop", False)
 
-        has_turntable_segs = any(s[0] == "turntable" for s in segments)
-        use_single_pass = has_turntable_segs
-        should_loop = has_turntable_segs or not has_robot_steps
+        def _laser(enable: bool):
+            if _turntable and _turntable.is_open:
+                try:
+                    _turntable.write(b"LAS:ENA\n" if enable else b"LAS:DIS\n")
+                except Exception:
+                    pass
+
+        async def _on_wait_line(text):
+            if "[STEP_START]" in text:
+                try:
+                    idx = int(text.split("[STEP_START]")[1].strip().split()[0])
+                except (ValueError, IndexError):
+                    return
+                if idx < len(active_steps):
+                    step = active_steps[idx]
+                    if step.get("with_laser", False):
+                        laser_start_delay = float(step.get("laser_delay", 0.0))
+                        if laser_start_delay > 0:
+                            await asyncio.sleep(laser_start_delay)
+                    _laser(step.get("with_laser", False))
+                return
+
+            if "[WAIT]" not in text:
+                return
+            _laser(False)  # laser off before turntable/laser step takes over
+            try:
+                idx = int(text.split("[WAIT]")[1].strip().split()[0])
+            except (ValueError, IndexError):
+                return
+            if idx >= len(active_steps):
+                return
+            step = active_steps[idx]
+            stype = step.get("type")
+            if stype == "Turntable":
+                await _run_turntable_segment(step)
+            elif stype == "Laser":
+                await _run_laser_segment(step)
+            if not _stop_requested and _active_proc and _active_proc.stdin:
+                try:
+                    _active_proc.stdin.write(b"RESUME\n")
+                    _active_proc.stdin.flush()
+                except Exception:
+                    pass
 
     t_start = time.monotonic()
     last_rc = 0
 
-    while True:
-        for seg_type, seg_data in segments:
-            if _stop_requested:
+    if is_parallel:
+        last_rc = await _run_robot_segment(
+            active_steps, plan_data, use_single_pass, on_line=tt_step_callback
+        )
+    elif has_robot_steps:
+        last_rc = await _run_robot_segment(
+            active_steps, plan_data, not should_loop, on_line=_on_wait_line
+        )
+        _laser(False)
+    else:
+        # Turntable/Laser only — server drives them directly
+        while True:
+            for step in active_steps:
+                if _stop_requested:
+                    break
+                stype = step.get("type")
+                if stype == "Turntable":
+                    await _run_turntable_segment(step)
+                elif stype == "Laser":
+                    await _run_laser_segment(step)
+            if _stop_requested or not should_loop:
                 break
-            if seg_type == "robot":
-                last_rc = await _run_robot_segment(
-                    seg_data, plan_data, use_single_pass, on_line=tt_step_callback
-                )
-            else:
-                await _run_turntable_segment(seg_data)
-        if _stop_requested or not should_loop:
-            break
 
     # Parallel mode: ensure turntable off after stop
     if is_parallel and _turntable and _turntable.is_open:
@@ -556,6 +619,7 @@ async def _run_robot_segment(seg_data: list, plan_data: dict, single_pass: bool,
             f"ros2 run lux_dsr_control move_joint_node --plan-file {tmp_path} {single_pass_flag}",
             shell=True, executable="/bin/bash",
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            stdin=subprocess.PIPE,
             preexec_fn=os.setsid,
         )
         await _stream_proc(_active_proc, on_line=on_line)
@@ -573,25 +637,53 @@ async def _run_turntable_segment(seg_data: dict):
     direction = seg_data.get("direction", "CW")
     speed_us = int(seg_data.get("speed_us", 500))
     duration = float(seg_data.get("duration", 1.0))
+    with_laser = seg_data.get("with_laser", False)
 
     if _turntable is None or not _turntable.is_open:
         await _broadcast("[WARN] Turntable not connected — skipping step\n")
         return
 
-    await _broadcast(f"Turntable: {direction} · {speed_us} μs · {duration:.1f}s\n")
+    laser_tag = " + Laser" if with_laser else ""
+    await _broadcast(f"Turntable{laser_tag}: {direction} · {speed_us} μs · {duration:.1f}s\n")
     try:
         _turntable.write(b"ENABLE\n")
         await asyncio.sleep(0.05)
         _turntable.write(f"DIR:{direction}\n".encode())
         await asyncio.sleep(0.05)
         _turntable.write(f"SPEED:{speed_us}\n".encode())
+        if with_laser:
+            await asyncio.sleep(0.05)
+            _turntable.write(b"LAS:ENA\n")
         elapsed = 0.0
         while elapsed < duration and not _stop_requested:
             await asyncio.sleep(0.1)
             elapsed += 0.1
         _turntable.write(b"DISABLE\n")
+        if with_laser:
+            await asyncio.sleep(0.05)
+            _turntable.write(b"LAS:DIS\n")
     except Exception as e:
         await _broadcast(f"[WARN] Turntable error: {e}\n")
+
+
+async def _run_laser_segment(seg_data: dict):
+    global _stop_requested
+    duration = float(seg_data.get("duration", 1.0))
+
+    if _turntable is None or not _turntable.is_open:
+        await _broadcast("[WARN] Turntable/laser not connected — skipping laser step\n")
+        return
+
+    await _broadcast(f"Laser: {duration:.1f}s\n")
+    try:
+        _turntable.write(b"LAS:ENA\n")
+        elapsed = 0.0
+        while elapsed < duration and not _stop_requested:
+            await asyncio.sleep(0.1)
+            elapsed += 0.1
+        _turntable.write(b"LAS:DIS\n")
+    except Exception as e:
+        await _broadcast(f"[WARN] Laser error: {e}\n")
 
 @app.post("/api/robot/stop")
 async def robot_stop():

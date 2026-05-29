@@ -317,7 +317,9 @@
                   <th class="pb-2.5 text-left w-16 font-semibold">Vel</th>
                   <th class="pb-2.5 text-left w-16 font-semibold">Acc</th>
                   <th class="pb-2.5 text-left w-16 font-semibold">Time</th>
+                  <th class="pb-2.5 text-left w-16 font-semibold">Delay</th>
                   <th class="pb-2.5 text-left w-16 font-semibold">Dir</th>
+                  <th class="pb-2.5 text-left w-14 font-semibold">Laser</th>
                 </tr>
               </thead>
               <tbody>
@@ -327,19 +329,24 @@
                     <td class="py-2.5 text-gray-400 text-xs font-mono" x-text="i + 1"></td>
                     <td class="py-2.5 pr-4">
                       <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium"
-                            :class="step.type === 'MoveJ' ? 'bg-blue-50 text-blue-700' : step.type === 'Turntable' ? 'bg-teal-50 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400' : 'bg-violet-50 text-violet-700'"
+                            :class="step.type === 'MoveJ' ? 'bg-blue-50 text-blue-700' : step.type === 'Turntable' ? 'bg-teal-50 text-teal-700' : step.type === 'Laser' ? 'bg-orange-50 text-orange-700' : 'bg-violet-50 text-violet-700'"
                             x-text="step.type"></span>
                     </td>
                     <td class="py-2.5 font-mono text-xs text-gray-700"
-                        x-text="step.type === 'Turntable' ? '' : step.pos.map(v => parseFloat(v).toFixed(1)).join(', ')"></td>
+                        x-text="(step.type === 'Turntable' || step.type === 'Laser') ? '' : step.pos.map(v => parseFloat(v).toFixed(1)).join(', ')"></td>
                     <td class="py-2.5 text-xs text-dim font-mono"
-                        x-text="step.type === 'Turntable' ? step.speed_us : (step.vel != null ? parseFloat(Array.isArray(step.vel) ? step.vel[0] : step.vel).toFixed(1) : '—')"></td>
+                        x-text="step.type === 'Turntable' ? step.speed_us : step.type === 'Laser' ? '—' : (step.vel != null ? parseFloat(Array.isArray(step.vel) ? step.vel[0] : step.vel).toFixed(1) : '—')"></td>
                     <td class="py-2.5 text-xs text-dim font-mono"
-                        x-text="step.type === 'Turntable' ? '—' : (step.acc != null ? parseFloat(Array.isArray(step.acc) ? step.acc[0] : step.acc).toFixed(1) : '—')"></td>
+                        x-text="(step.type === 'Turntable' || step.type === 'Laser') ? '—' : (step.acc != null ? parseFloat(Array.isArray(step.acc) ? step.acc[0] : step.acc).toFixed(1) : '—')"></td>
                     <td class="py-2.5 text-xs text-dim font-mono"
-                        x-text="step.type === 'Turntable' ? step.duration : (step.time != null ? parseFloat(step.time).toFixed(1) : '—')"></td>
+                        x-text="(step.type === 'Turntable' || step.type === 'Laser') ? step.duration : (step.time != null ? parseFloat(step.time).toFixed(1) : '—')"></td>
+                    <td class="py-2.5 text-xs text-dim font-mono"
+                        x-text="(step.type === 'MoveJ' || step.type === 'MoveL') && step.delay > 0 ? step.delay.toFixed(1) + 's' : '—'"></td>
                     <td class="py-2.5 text-xs text-dim font-mono"
                         x-text="step.type === 'Turntable' ? step.direction : '—'"></td>
+                    <td class="py-2.5 text-xs font-mono"
+                        :class="(step.type === 'Laser' || step.with_laser) ? 'text-orange-600 font-semibold' : 'text-dim'"
+                        x-text="step.type === 'Laser' ? 'Yes' : step.with_laser ? 'Yes' : (step.type === 'Turntable' ? 'No' : '—')"></td>
                   </tr>
                 </template>
               </tbody>
@@ -512,9 +519,9 @@
   <footer x-show="currentPage === 'robot'" class="pr-5 py-3 bg-surface-raised shadow-footer flex items-center flex-shrink-0 relative z-10">
     <div class="w-64 flex items-center gap-3 px-5 flex-shrink-0">
       <button @click="startPlan()"
-              :disabled="!selected || running || (!connected && selected?.steps?.some(s => s.type !== 'Turntable'))"
+              :disabled="!selected || running || (!connected && selected?.steps?.some(s => s.type !== 'Turntable' && s.type !== 'Laser'))"
               class="focus-ring flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-md transition-all duration-150"
-              :class="!selected || running || (!connected && selected?.steps?.some(s => s.type !== 'Turntable'))
+              :class="!selected || running || (!connected && selected?.steps?.some(s => s.type !== 'Turntable' && s.type !== 'Laser'))
                 ? 'bg-btn text-gray-400 cursor-not-allowed opacity-60'
                 : 'bg-green-600 hover:bg-green-700 text-white'">
         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -671,6 +678,21 @@
                  class="focus-ring w-full bg-surface-input border border-chrome-input rounded-lg px-3 py-2 text-sm font-mono text-gray-900 transition-colors duration-150" />
         </div>
 
+        <!-- Loop toggle -->
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-xs font-medium text-gray-700">Loop</div>
+            <div class="text-[11px] text-dim mt-0.5">Repeat the plan continuously until stopped</div>
+          </div>
+          <button @click="modalLoop = !modalLoop; markDirty()"
+                  class="focus-ring relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200"
+                  :class="modalLoop ? 'bg-accent-ui' : 'bg-gray-200'"
+                  role="switch" :aria-checked="modalLoop" aria-label="Loop">
+            <span class="pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform duration-200"
+                  :class="modalLoop ? 'translate-x-4' : 'translate-x-0'"></span>
+          </button>
+        </div>
+
         <!-- Error -->
         <div x-show="planModalError"
              class="rounded-lg px-3 py-2.5 text-xs font-medium text-red-700 bg-red-50 border border-red-200"
@@ -790,10 +812,16 @@
                      x-model.number="modalTtDuration"
                      class="focus-ring w-full bg-surface-raised border border-chrome-input rounded-lg px-3 py-2 text-sm font-mono text-gray-900 transition-colors duration-150" />
             </div>
-            <button @click="addTurntableStep()"
-                    class="focus-ring w-full py-2.5 text-sm font-semibold rounded-lg border border-chrome-input bg-surface-raised hover:bg-btn text-gray-700 transition-colors duration-150">
-              + Add Turntable Step
-            </button>
+            <div class="flex gap-2">
+              <button @click="addTurntableStep()"
+                      class="focus-ring flex-1 py-2.5 text-sm font-semibold rounded-lg border border-chrome-input bg-surface-raised hover:bg-btn text-gray-700 transition-colors duration-150">
+                + Turntable Step
+              </button>
+              <button @click="addLaserStep()"
+                      class="focus-ring flex-1 py-2.5 text-sm font-semibold rounded-lg border border-chrome-input bg-surface-raised hover:bg-btn text-gray-700 transition-colors duration-150">
+                + Laser Step
+              </button>
+            </div>
           </div>
 
           <!-- Parallel mode note -->
@@ -890,12 +918,17 @@
                 <div class="flex items-center gap-2 mb-2.5">
                   <div class="drag-handle flex-shrink-0 text-gray-300 hover:text-gray-500 select-none px-0.5" aria-hidden="true">⠿</div>
                   <span class="text-xs text-gray-400 w-4 flex-shrink-0 font-mono" x-text="i + 1"></span>
-                  <select x-model="step.type" @change="onStepTypeChange(i, step)"
-                          class="focus-ring bg-surface-input border border-chrome-input rounded-md pl-2.5 pr-7 py-1 text-sm font-mono text-gray-900 transition-colors duration-150">
-                    <option>MoveJ</option>
-                    <option>MoveL</option>
-                    <option x-show="!modalTtParallel">Turntable</option>
-                  </select>
+                  <template x-if="step.type !== 'Laser'">
+                    <select x-model="step.type" @change="onStepTypeChange(i, step)"
+                            class="focus-ring bg-surface-input border border-chrome-input rounded-md pl-2.5 pr-7 py-1 text-sm font-mono text-gray-900 transition-colors duration-150">
+                      <option>MoveJ</option>
+                      <option>MoveL</option>
+                      <option x-show="!modalTtParallel">Turntable</option>
+                    </select>
+                  </template>
+                  <template x-if="step.type === 'Laser'">
+                    <span class="px-2.5 py-1 text-sm font-mono text-orange-700 bg-orange-50 border border-orange-200 rounded-md">Laser</span>
+                  </template>
                   <button x-show="planMode === 'handguide' && handGuideEnabled"
                           @click="selectStep(i)"
                           :class="selectedStepIndex === i ? 'text-indigo-700 bg-indigo-50 border-indigo-300' : 'text-gray-500 hover:text-gray-700 bg-btn border-chrome-input'"
@@ -904,7 +937,7 @@
                     update
                   </button>
                   <!-- with_turntable checkbox (parallel mode, robot steps only) -->
-                  <label x-show="modalTtParallel && step.type !== 'Turntable'"
+                  <label x-show="modalTtParallel && step.type !== 'Turntable' && step.type !== 'Laser'"
                          class="flex items-center gap-1 cursor-pointer select-none"
                          :class="!step.enabled ? 'opacity-40 pointer-events-none' : ''"
                          :title="'Run with turntable, step ' + (i + 1)">
@@ -925,7 +958,7 @@
                   </button>
                 </div>
                 <!-- Robot step fields -->
-                <template x-if="step.type !== 'Turntable'">
+                <template x-if="step.type !== 'Turntable' && step.type !== 'Laser'">
                   <div>
                     <div class="grid grid-cols-6 gap-1 mb-1">
                       <template x-for="(_, j) in [0,1,2,3,4,5]" :key="j">
@@ -940,7 +973,7 @@
                     </div>
                     <div class="text-[10px] text-dim mb-2"
                          x-text="step.type === 'MoveJ' ? 'J1 – J6 (all degrees)' : 'X, Y, Z (mm) · A, B, C (degrees)'"></div>
-                    <div class="grid grid-cols-3 gap-2">
+                    <div class="grid grid-cols-4 gap-2">
                       <div>
                         <label :for="'step-vel-' + i" class="block text-[11px] text-gray-500 mb-1">Vel</label>
                         <input :id="'step-vel-' + i" type="number" step="any" x-model.number="step.vel" @change="markDirty()"
@@ -956,6 +989,27 @@
                         <input :id="'step-time-' + i" type="number" step="any" x-model.number="step.time" @change="markDirty()"
                                class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
                       </div>
+                      <div>
+                        <label :for="'step-delay-' + i" class="block text-[11px] text-gray-500 mb-1">Delay (s)</label>
+                        <input :id="'step-delay-' + i" type="number" step="any" min="0" x-model.number="step.delay" @change="markDirty()"
+                               class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-3 mt-1 flex-wrap">
+                      <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                        <input type="checkbox" x-model="step.with_laser" @change="markDirty()" class="rounded" />
+                        <span class="text-[11px] text-gray-600">Laser during movement</span>
+                      </label>
+                      <template x-if="step.with_laser">
+                        <div class="flex items-baseline gap-1">
+                          <label :for="'step-laser-delay-' + i" class="text-[11px] text-gray-500">Start delay</label>
+                          <input :id="'step-laser-delay-' + i" type="number" step="0.1" min="0"
+                                 x-model.number="step.laser_delay" @change="markDirty()"
+                                 class="no-spinner focus-ring w-14 bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150"
+                                 :aria-label="'Laser start delay seconds, step ' + (i + 1)" />
+                          <span class="text-[11px] text-dim">s</span>
+                        </div>
+                      </template>
                     </div>
                   </div>
                 </template>
@@ -992,7 +1046,23 @@
                                :aria-label="'Duration seconds, step ' + (i + 1)" />
                         <span class="text-[11px] text-dim">s</span>
                       </div>
+                      <label class="flex items-center gap-1.5 cursor-pointer select-none ml-auto">
+                        <input type="checkbox" x-model="step.with_laser" @change="markDirty()" class="rounded" />
+                        <span class="text-[11px] text-gray-600">+ Laser</span>
+                      </label>
                     </div>
+                  </div>
+                </template>
+
+                <!-- Laser step fields -->
+                <template x-if="step.type === 'Laser'">
+                  <div class="flex items-baseline gap-1">
+                    <label :for="'step-laser-dur-' + i" class="text-[11px] text-gray-500">Duration</label>
+                    <input :id="'step-laser-dur-' + i" type="number" min="0.1" step="0.1"
+                           x-model.number="step.duration" @change="markDirty()"
+                           class="no-spinner focus-ring w-16 text-right bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150"
+                           :aria-label="'Laser duration seconds, step ' + (i + 1)" />
+                    <span class="text-[11px] text-dim">s</span>
                   </div>
                 </template>
               </div>
@@ -1105,6 +1175,6 @@
     </div>
   </div>
 
-  <script src="/ui/app.js"></script>
+  <script src="/ui/app.js?v=202605291"></script>
 </body>
 </html>
