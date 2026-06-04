@@ -1,7 +1,9 @@
 import atexit
 import asyncio
 import json
+import math
 import os
+import re
 import signal
 import subprocess
 import tempfile
@@ -50,11 +52,13 @@ STATS_DIR.mkdir(exist_ok=True)
 async def lifespan(_app: FastAPI):
     scan = asyncio.create_task(_turntable_scan_task())
     watchdog = asyncio.create_task(_turntable_watchdog_task())
+    serial_read = asyncio.create_task(_tt_serial_read_task())
     yield
     scan.cancel()
     watchdog.cancel()
+    serial_read.cancel()
     try:
-        await asyncio.gather(scan, watchdog)
+        await asyncio.gather(scan, watchdog, serial_read)
     except asyncio.CancelledError:
         pass
     _kill_robot_procs()
@@ -81,6 +85,7 @@ _tt_direction: str = "CW"
 _tt_speed: int = 50  # microseconds between pulses
 _tt_pending_port: Optional[str] = None  # detected Arduino port awaiting user confirm
 _tt_rejected_ports: set = set()  # ports user declined; auto-scanner skips these
+_emg_state: Optional[int] = None  # None=unknown, 1=normal, 0=triggered
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -140,6 +145,71 @@ async def _turntable_watchdog_task():
                 _close_turntable()
         await asyncio.sleep(2)
 
+async def _handle_emergency():
+    global _stop_requested, _tt_enabled, _active_plan
+    # Stop turntable and laser immediately
+    if _turntable and _turntable.is_open:
+        try:
+            _turntable.write(b"DISABLE\n")
+            _turntable.write(b"LAS:DIS\n")
+        except Exception:
+            pass
+    _tt_enabled = False
+    # Ask the running node to call move_stop itself then exit — zero startup cost
+    if _active_proc and _active_proc.poll() is None:
+        try:
+            _active_proc.stdin.write(b"EMERGENCY\n")
+            _active_proc.stdin.flush()
+            asyncio.create_task(_emergency_fallback_kill())
+        except Exception:
+            # stdin write failed — fall back to SIGINT immediately
+            _stop_requested = True
+            try:
+                os.killpg(os.getpgid(_active_proc.pid), signal.SIGINT)
+            except ProcessLookupError:
+                pass
+    _active_plan = None
+    _stop_requested = False
+    await _broadcast("[EMERGENCY STOP]\n")
+
+async def _debounced_emg_clear():
+    """Wait 200ms then broadcast EMG_CLEAR only if state is still 1 (no re-trigger)."""
+    await asyncio.sleep(0.2)
+    if _emg_state == 1:
+        await _broadcast("[EMG_CLEAR]\n")
+
+async def _emergency_fallback_kill():
+    """If the node hasn't exited 2s after EMERGENCY was sent, SIGINT it."""
+    await asyncio.sleep(2.0)
+    if _active_proc and _active_proc.poll() is None:
+        try:
+            os.killpg(os.getpgid(_active_proc.pid), signal.SIGINT)
+        except (ProcessLookupError, OSError):
+            pass
+
+async def _tt_serial_read_task():
+    """Read serial lines from Arduino; broadcast EMG state and trigger emergency on EMG:0."""
+    global _emg_state
+    loop = asyncio.get_event_loop()
+    while True:
+        if _turntable and _turntable.is_open:
+            try:
+                if _turntable.in_waiting > 0:
+                    line = await loop.run_in_executor(None, _turntable.readline)
+                    text = line.decode(errors="replace").strip()
+                    if text.startswith("EMG:"):
+                        val = int(text.split(":")[1])
+                        prev = _emg_state
+                        _emg_state = val
+                        await _broadcast(f"[EMG] {val}\n")
+                        if val == 0 and prev != 0:
+                            await _handle_emergency()
+                        elif val == 1 and prev == 0:
+                            asyncio.create_task(_debounced_emg_clear())
+            except Exception:
+                pass
+        await asyncio.sleep(0.005)
+
 async def _schedule_safety_shutdown():
     """Grace-period watchdog: if no browser client reconnects within 8 s, stop the robot."""
     await asyncio.sleep(8)
@@ -161,6 +231,54 @@ def _plan_path(name: str) -> Path:
 def _stats_path(name: str) -> Path:
     return STATS_DIR / f"{name}.json"
 
+def _rotation_matrix_zyz(A_deg: float, B_deg: float, C_deg: float) -> list:
+    """3×3 rotation matrix from ZYZ Euler angles (degrees): R = Rz(A) @ Ry(B) @ Rz(C).
+
+    Doosan TCP orientation pos[3..5] = [A, B, C] uses ZYZ convention.
+    Columns are tool-frame axes expressed in base frame.
+    """
+    A = math.radians(A_deg)
+    B = math.radians(B_deg)
+    C = math.radians(C_deg)
+    cA, sA = math.cos(A), math.sin(A)
+    cB, sB = math.cos(B), math.sin(B)
+    cC, sC = math.cos(C), math.sin(C)
+    return [
+        [cA*cB*cC - sA*sC,  -cA*cB*sC - sA*cC,  cA*sB],
+        [sA*cB*cC + cA*sC,  -sA*cB*sC + cA*cC,  sA*sB],
+        [-sB*cC,             sB*sC,               cB   ],
+    ]
+
+
+def _compute_weld_displacement(pos_a: list, pos_b: list) -> tuple:
+    """Compute the corrected weld displacement in tool frame from two base-frame poses.
+
+    Algorithm:
+      1. Build the A→B vector in base frame (XYZ only).
+      2. Rotate it into the tool frame using A's orientation (R^T @ v).
+      3. Zero the tool-Z component — this is the surface-normal direction,
+         so zeroing it pins the weld to the surface plane regardless of depth drift.
+      4. Return as a 6-DOF relative pose [dx, dy, 0, 0, 0, 0] suitable for
+         move_line(ref=1, mode=1), plus the in-plane Euclidean distance.
+
+    Returns: (displacement: list[float], distance_mm: float)
+    """
+    vx = pos_b[0] - pos_a[0]
+    vy = pos_b[1] - pos_a[1]
+    vz = pos_b[2] - pos_a[2]
+
+    R = _rotation_matrix_zyz(pos_a[3], pos_a[4], pos_a[5])
+
+    # v_tool = R^T @ v_base  (transpose = inverse for rotation matrices)
+    dx_t = R[0][0]*vx + R[1][0]*vy + R[2][0]*vz
+    dy_t = R[0][1]*vx + R[1][1]*vy + R[2][1]*vz
+    # R[*][2] row (tool Z) is intentionally discarded
+
+    distance_mm = math.sqrt(dx_t**2 + dy_t**2)
+    displacement = [round(dx_t, 4), round(dy_t, 4), 0.0, 0.0, 0.0, 0.0]
+    return displacement, round(distance_mm, 3)
+
+
 def _coerce_step_floats(step: dict) -> dict:
     """Ensure all numeric fields in a step are stored as the correct Python types."""
     if step.get("type") in ("Turntable", "Laser"):
@@ -168,6 +286,40 @@ def _coerce_step_floats(step: dict) -> dict:
             step["speed_us"] = int(step["speed_us"])
         if "duration" in step:
             step["duration"] = float(step["duration"])
+        if "with_laser" in step:
+            step["with_laser"] = bool(step["with_laser"])
+        return step
+    if step.get("type") == "WeldStraight":
+        step["pos_a"] = [float(v) for v in step["pos_a"]]
+        step["pos_b"] = [float(v) for v in step["pos_b"]]
+        for key in ("vel", "acc"):
+            if key in step:
+                v = step[key]
+                step[key] = [float(x) for x in v] if isinstance(v, list) else float(v)
+        for key in ("time", "laser_delay"):
+            if key in step:
+                step[key] = float(step[key])
+        if "with_laser" in step:
+            step["with_laser"] = bool(step["with_laser"])
+        # Always (re-)compute displacement from the authoritative A and B positions
+        displacement, distance_mm = _compute_weld_displacement(step["pos_a"], step["pos_b"])
+        step["displacement"] = displacement
+        step["distance_mm"] = distance_mm
+        return step
+    if step.get("type") == "MoveC":
+        for key in ("pos_start", "pos_via"):
+            if key in step and step[key] is not None:
+                step[key] = [float(v) for v in step[key]]
+        # pos_end is None for full-circle steps (angle2=360); only coerce when present
+        if step.get("pos_end") is not None:
+            step["pos_end"] = [float(v) for v in step["pos_end"]]
+        for key in ("vel", "acc"):
+            if key in step:
+                v = step[key]
+                step[key] = [float(x) for x in v] if isinstance(v, list) else float(v)
+        for key in ("time", "angle1", "angle2"):
+            if key in step:
+                step[key] = float(step[key])
         if "with_laser" in step:
             step["with_laser"] = bool(step["with_laser"])
         return step
@@ -755,6 +907,17 @@ async def _ros_call(cmd: str) -> bool:
         await _broadcast(chunk.decode(errors="replace"))
     return (await proc.wait()) == 0
 
+async def _ros_call_output(cmd: str) -> tuple:
+    """Run a ROS2 command and return (success, stdout_text) without broadcasting."""
+    proc = await asyncio.create_subprocess_shell(
+        ROS_ENV + cmd,
+        executable="/bin/bash",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await proc.communicate()
+    return proc.returncode == 0, stdout.decode(errors="replace")
+
 SRV_TRIGGER = "std_srvs/srv/Trigger {}"
 CAPTURE_NODE = "/pose_capture_client"
 
@@ -813,6 +976,29 @@ async def hand_guide_save():
     ok = await _ros_call(f"ros2 service call {CAPTURE_NODE}/save_plan {SRV_TRIGGER}")
     return {"ok": ok}
 
+@app.post("/api/robot/capture_pose")
+async def capture_pose():
+    """Read the current TCP pose (base frame) via pose_capture_node and return as [x,y,z,rx,ry,rz]."""
+    if not _connected:
+        raise HTTPException(409, "Robot not connected")
+    ok, output = await _ros_call_output(
+        f"ros2 service call {CAPTURE_NODE}/capture_posx {SRV_TRIGGER}"
+    )
+    if not ok:
+        raise HTTPException(500, "capture_posx service call failed")
+    # pose_capture_node puts the JSON array in the Trigger response message field.
+    # ros2 service call output format: ...message='[x, y, z, rx, ry, rz]'...
+    match = re.search(r"message='(\[.*?\])'", output)
+    if not match:
+        raise HTTPException(500, f"Could not parse pose from service response")
+    try:
+        pos = json.loads(match.group(1))
+        if len(pos) != 6:
+            raise ValueError("Expected 6-element pose")
+        return {"pos": pos}
+    except (json.JSONDecodeError, ValueError) as e:
+        raise HTTPException(500, f"Invalid pose data: {e}")
+
 class HandGuideTypeBody(BaseModel):
     move_type: str
 
@@ -862,7 +1048,12 @@ async def turntable_status():
         "speed": _tt_speed,
         "pending_port": _tt_pending_port,
         "rejected_ports": sorted(_tt_rejected_ports),
+        "emg_state": _emg_state,
     }
+
+@app.get("/api/turntable/emg")
+async def turntable_emg():
+    return {"state": _emg_state}
 
 class TurntableConfirmBody(BaseModel):
     port: str

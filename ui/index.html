@@ -313,7 +313,7 @@
                 <tr class="text-dim text-[10px] font-semibold uppercase tracking-wider border-b border-chrome">
                   <th class="pb-2.5 text-left w-8 font-semibold">#</th>
                   <th class="pb-2.5 text-left w-20 font-semibold">Type</th>
-                  <th class="pb-2.5 text-left font-semibold">Position <span class="normal-case tracking-normal font-normal text-dim">(MoveL: X/Y/Z mm, A/B/C deg · MoveJ: J1–J6 deg)</span></th>
+                  <th class="pb-2.5 text-left font-semibold">Position <span class="normal-case tracking-normal font-normal text-dim">(MoveL: X/Y/Z mm, A/B/C deg · MoveJ: J1–J6 deg · WeldStraight: A→B distance · MoveC: arc/circle)</span></th>
                   <th class="pb-2.5 text-left w-16 font-semibold">Vel</th>
                   <th class="pb-2.5 text-left w-16 font-semibold">Acc</th>
                   <th class="pb-2.5 text-left w-16 font-semibold">Time</th>
@@ -329,11 +329,11 @@
                     <td class="py-2.5 text-gray-400 text-xs font-mono" x-text="i + 1"></td>
                     <td class="py-2.5 pr-4">
                       <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium"
-                            :class="step.type === 'MoveJ' ? 'bg-blue-50 text-blue-700' : step.type === 'Turntable' ? 'bg-teal-50 text-teal-700' : step.type === 'Laser' ? 'bg-orange-50 text-orange-700' : 'bg-violet-50 text-violet-700'"
+                            :class="step.type === 'MoveJ' ? 'bg-blue-50 text-blue-700' : step.type === 'Turntable' ? 'bg-teal-50 text-teal-700' : step.type === 'Laser' ? 'bg-orange-50 text-orange-700' : step.type === 'WeldStraight' ? 'bg-rose-50 text-rose-700' : step.type === 'MoveC' ? 'bg-emerald-50 text-emerald-700' : 'bg-violet-50 text-violet-700'"
                             x-text="step.type"></span>
                     </td>
                     <td class="py-2.5 font-mono text-xs text-gray-700"
-                        x-text="(step.type === 'Turntable' || step.type === 'Laser') ? '' : step.pos.map(v => parseFloat(v).toFixed(1)).join(', ')"></td>
+                        x-text="(step.type === 'Turntable' || step.type === 'Laser') ? '' : step.type === 'WeldStraight' ? ('A→B  ' + (step.distance_mm != null ? parseFloat(step.distance_mm).toFixed(1) + ' mm' : '—')) : step.type === 'MoveC' ? ('A→B→C' + (step.angle2 == 360 ? '  full circle' : '  arc') + (step.pos_start && step.pos_via && step.pos_end ? '' : '  (incomplete)')) : step.pos.map(v => parseFloat(v).toFixed(1)).join(', ')"></td>
                     <td class="py-2.5 text-xs text-dim font-mono"
                         x-text="step.type === 'Turntable' ? step.speed_us : step.type === 'Laser' ? '—' : (step.vel != null ? parseFloat(Array.isArray(step.vel) ? step.vel[0] : step.vel).toFixed(1) : '—')"></td>
                     <td class="py-2.5 text-xs text-dim font-mono"
@@ -923,6 +923,8 @@
                             class="focus-ring bg-surface-input border border-chrome-input rounded-md pl-2.5 pr-7 py-1 text-sm font-mono text-gray-900 transition-colors duration-150">
                       <option>MoveJ</option>
                       <option>MoveL</option>
+                      <option>WeldStraight</option>
+                      <option>MoveC</option>
                       <option x-show="!modalTtParallel">Turntable</option>
                     </select>
                   </template>
@@ -958,7 +960,7 @@
                   </button>
                 </div>
                 <!-- Robot step fields -->
-                <template x-if="step.type !== 'Turntable' && step.type !== 'Laser'">
+                <template x-if="step.type !== 'Turntable' && step.type !== 'Laser' && step.type !== 'WeldStraight' && step.type !== 'MoveC'">
                   <div>
                     <div class="grid grid-cols-6 gap-1 mb-1">
                       <template x-for="(_, j) in [0,1,2,3,4,5]" :key="j">
@@ -1063,6 +1065,190 @@
                            class="no-spinner focus-ring w-16 text-right bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150"
                            :aria-label="'Laser duration seconds, step ' + (i + 1)" />
                     <span class="text-[11px] text-dim">s</span>
+                  </div>
+                </template>
+
+                <!-- WeldStraight step fields -->
+                <template x-if="step.type === 'WeldStraight'">
+                  <div class="space-y-3">
+
+                    <!-- Hand-guide reminder -->
+                    <div x-show="!handGuideEnabled"
+                         class="flex items-center gap-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      <span aria-hidden="true">⚠</span>
+                      Enable Hand Guide above before recording weld points.
+                    </div>
+
+                    <!-- Point A + B record row -->
+                    <div class="grid grid-cols-2 gap-2">
+                      <div class="rounded-lg border border-chrome bg-surface-input p-2.5 space-y-1.5">
+                        <div class="text-[10px] font-semibold text-dim uppercase tracking-widest">Point A — weld start</div>
+                        <div class="font-mono text-[11px] text-gray-600 min-h-[2rem] flex items-center"
+                             x-text="step.pos_a ? '[' + step.pos_a.slice(0,3).map(v => parseFloat(v).toFixed(1)).join(', ') + '] mm' : 'Not recorded'"></div>
+                        <button @click="captureWeldPoint(i, 'a')"
+                                :disabled="!handGuideEnabled || weldCapturing === i + '-a'"
+                                class="focus-ring w-full py-1.5 text-xs font-semibold rounded-md transition-colors duration-150"
+                                :class="step.pos_a ? 'bg-surface-raised hover:bg-btn text-gray-700 border border-chrome-input' : 'bg-rose-600 hover:bg-rose-700 text-white'"
+                                :aria-label="'Record Point A for step ' + (i + 1)">
+                          <span x-text="weldCapturing === i + '-a' ? 'Recording…' : (step.pos_a ? 'Re-record A' : 'Record A')"></span>
+                        </button>
+                      </div>
+                      <div class="rounded-lg border border-chrome bg-surface-input p-2.5 space-y-1.5">
+                        <div class="text-[10px] font-semibold text-dim uppercase tracking-widest">Point B — weld end</div>
+                        <div class="font-mono text-[11px] text-gray-600 min-h-[2rem] flex items-center"
+                             x-text="step.pos_b ? '[' + step.pos_b.slice(0,3).map(v => parseFloat(v).toFixed(1)).join(', ') + '] mm' : 'Not recorded'"></div>
+                        <button @click="captureWeldPoint(i, 'b')"
+                                :disabled="!handGuideEnabled || weldCapturing === i + '-b'"
+                                class="focus-ring w-full py-1.5 text-xs font-semibold rounded-md transition-colors duration-150"
+                                :class="step.pos_b ? 'bg-surface-raised hover:bg-btn text-gray-700 border border-chrome-input' : 'bg-rose-600 hover:bg-rose-700 text-white'"
+                                :aria-label="'Record Point B for step ' + (i + 1)">
+                          <span x-text="weldCapturing === i + '-b' ? 'Recording…' : (step.pos_b ? 'Re-record B' : 'Record B')"></span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- Computed distance badge -->
+                    <div x-show="step.pos_a && step.pos_b"
+                         class="flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700">
+                      <span class="font-semibold">Weld distance:</span>
+                      <span x-text="step.distance_mm != null ? parseFloat(step.distance_mm).toFixed(2) + ' mm' : 'calculating…'" class="font-mono"></span>
+                      <span class="text-rose-400 ml-auto text-[10px]">surface-projected, depth drift removed</span>
+                    </div>
+
+                    <!-- Weld speed controls -->
+                    <div class="grid grid-cols-3 gap-2">
+                      <div>
+                        <label :for="'step-weld-vel-' + i" class="block text-[11px] text-gray-500 mb-1">Vel (mm/s)</label>
+                        <input :id="'step-weld-vel-' + i" type="number" step="any" min="0.1"
+                               x-model.number="step.vel" @change="markDirty()"
+                               class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
+                      </div>
+                      <div>
+                        <label :for="'step-weld-acc-' + i" class="block text-[11px] text-gray-500 mb-1">Acc (mm/s²)</label>
+                        <input :id="'step-weld-acc-' + i" type="number" step="any" min="0.1"
+                               x-model.number="step.acc" @change="markDirty()"
+                               class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
+                      </div>
+                      <div>
+                        <label :for="'step-weld-time-' + i" class="block text-[11px] text-gray-500 mb-1">Time (s, 0=auto)</label>
+                        <input :id="'step-weld-time-' + i" type="number" step="any" min="0"
+                               x-model.number="step.time" @change="markDirty()"
+                               class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
+                      </div>
+                    </div>
+
+                    <!-- Laser toggle -->
+                    <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input type="checkbox" x-model="step.with_laser" @change="markDirty()" class="rounded" />
+                      <span class="text-[11px] text-gray-600">Laser on during weld</span>
+                    </label>
+
+                    <p class="text-[10px] text-dim leading-relaxed">
+                      Robot approaches Point A at full speed, then welds a perfectly straight line to the
+                      surface-projected B. Depth drift in Point B is automatically removed.
+                    </p>
+                  </div>
+                </template>
+
+                <!-- MoveC step fields -->
+                <template x-if="step.type === 'MoveC'">
+                  <div class="space-y-3">
+
+                    <!-- Hand-guide reminder -->
+                    <div x-show="!handGuideEnabled"
+                         class="flex items-center gap-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      <span aria-hidden="true">⚠</span>
+                      Enable Hand Guide above before recording circle points.
+                    </div>
+
+                    <!-- Full-circle toggle — shown first so it controls which points appear -->
+                    <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input type="checkbox" @change="step.angle2 = $event.target.checked ? 360 : 0; markDirty()"
+                             :checked="step.angle2 == 360" class="rounded" />
+                      <span class="text-[11px] text-gray-700 font-medium">Full circle (360°)</span>
+                    </label>
+
+                    <!-- 3-point record row — same layout for both full circle and arc -->
+                    <div class="grid grid-cols-3 gap-2">
+                      <!-- Point A -->
+                      <div class="rounded-lg border border-chrome bg-surface-input p-2.5 space-y-1.5">
+                        <div class="text-[10px] font-semibold text-dim uppercase tracking-widest"
+                             x-text="step.angle2 == 360 ? 'A — 0°  start' : 'A — arc start'"></div>
+                        <div class="font-mono text-[11px] text-gray-600 min-h-[2rem] flex items-center"
+                             x-text="step.pos_start ? '[' + step.pos_start.slice(0,3).map(v => parseFloat(v).toFixed(1)).join(', ') + ']' : 'Not recorded'"></div>
+                        <button @click="captureCirclePoint(i, 'a')"
+                                :disabled="!handGuideEnabled || circleCapturing === i + '-a'"
+                                class="focus-ring w-full py-1.5 text-xs font-semibold rounded-md transition-colors duration-150"
+                                :class="step.pos_start ? 'bg-surface-raised hover:bg-btn text-gray-700 border border-chrome-input' : 'bg-emerald-600 hover:bg-emerald-700 text-white'">
+                          <span x-text="circleCapturing === i + '-a' ? 'Recording…' : (step.pos_start ? 'Re-record A' : 'Record A')"></span>
+                        </button>
+                      </div>
+                      <!-- Point B -->
+                      <div class="rounded-lg border border-chrome bg-surface-input p-2.5 space-y-1.5">
+                        <div class="text-[10px] font-semibold text-dim uppercase tracking-widest"
+                             x-text="step.angle2 == 360 ? 'B — ~120°' : 'B — midpoint'"></div>
+                        <div class="font-mono text-[11px] text-gray-600 min-h-[2rem] flex items-center"
+                             x-text="step.pos_via ? '[' + step.pos_via.slice(0,3).map(v => parseFloat(v).toFixed(1)).join(', ') + ']' : 'Not recorded'"></div>
+                        <button @click="captureCirclePoint(i, 'b')"
+                                :disabled="!handGuideEnabled || circleCapturing === i + '-b'"
+                                class="focus-ring w-full py-1.5 text-xs font-semibold rounded-md transition-colors duration-150"
+                                :class="step.pos_via ? 'bg-surface-raised hover:bg-btn text-gray-700 border border-chrome-input' : 'bg-emerald-600 hover:bg-emerald-700 text-white'">
+                          <span x-text="circleCapturing === i + '-b' ? 'Recording…' : (step.pos_via ? 'Re-record B' : 'Record B')"></span>
+                        </button>
+                      </div>
+                      <!-- Point C -->
+                      <div class="rounded-lg border border-chrome bg-surface-input p-2.5 space-y-1.5">
+                        <div class="text-[10px] font-semibold text-dim uppercase tracking-widest"
+                             x-text="step.angle2 == 360 ? 'C — ~240°' : 'C — arc end'"></div>
+                        <div class="font-mono text-[11px] text-gray-600 min-h-[2rem] flex items-center"
+                             x-text="step.pos_end ? '[' + step.pos_end.slice(0,3).map(v => parseFloat(v).toFixed(1)).join(', ') + ']' : 'Not recorded'"></div>
+                        <button @click="captureCirclePoint(i, 'c')"
+                                :disabled="!handGuideEnabled || circleCapturing === i + '-c'"
+                                class="focus-ring w-full py-1.5 text-xs font-semibold rounded-md transition-colors duration-150"
+                                :class="step.pos_end ? 'bg-surface-raised hover:bg-btn text-gray-700 border border-chrome-input' : 'bg-emerald-600 hover:bg-emerald-700 text-white'">
+                          <span x-text="circleCapturing === i + '-c' ? 'Recording…' : (step.pos_end ? 'Re-record C' : 'Record C')"></span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- Hint changes based on mode -->
+                    <div x-show="step.angle2 == 360"
+                         class="flex items-start gap-2 text-[11px] text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                      <span aria-hidden="true" class="mt-0.5">●</span>
+                      <span>Space A, B, C evenly around the circle (~120° apart). Do <strong>not</strong> record C at the same position as A — they must be 3 distinct points so the controller can compute an accurate circle. <code>angle2=360</code> closes the loop back to A automatically.</span>
+                    </div>
+                    <div x-show="step.angle2 != 360"
+                         class="text-[10px] text-dim leading-relaxed">
+                      A = arc start, B = any point along the arc, C = arc end.
+                    </div>
+
+                    <!-- Speed controls -->
+                    <div class="grid grid-cols-3 gap-2">
+                      <div>
+                        <label :for="'step-circle-vel-' + i" class="block text-[11px] text-gray-500 mb-1">Vel (mm/s)</label>
+                        <input :id="'step-circle-vel-' + i" type="number" step="any" min="0.1"
+                               x-model.number="step.vel" @change="markDirty()"
+                               class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
+                      </div>
+                      <div>
+                        <label :for="'step-circle-acc-' + i" class="block text-[11px] text-gray-500 mb-1">Acc (mm/s²)</label>
+                        <input :id="'step-circle-acc-' + i" type="number" step="any" min="0.1"
+                               x-model.number="step.acc" @change="markDirty()"
+                               class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
+                      </div>
+                      <div>
+                        <label :for="'step-circle-time-' + i" class="block text-[11px] text-gray-500 mb-1">Time (s, 0=auto)</label>
+                        <input :id="'step-circle-time-' + i" type="number" step="any" min="0"
+                               x-model.number="step.time" @change="markDirty()"
+                               class="focus-ring w-full bg-surface-input border border-chrome-input rounded-md px-2 py-1 text-xs font-mono text-gray-900 transition-colors duration-150" />
+                      </div>
+                    </div>
+
+                    <!-- Laser toggle -->
+                    <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input type="checkbox" x-model="step.with_laser" @change="markDirty()" class="rounded" />
+                      <span class="text-[11px] text-gray-600">Laser on during arc</span>
+                    </label>
                   </div>
                 </template>
               </div>
@@ -1170,6 +1356,32 @@
                   :class="ttDetectLoading ? 'opacity-60 cursor-not-allowed' : ''"
                   x-text="ttDetectLoading ? 'Connecting…' : (ttNeedsSudo ? 'Connect with sudo' : 'Connect')">
           </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Emergency Stop Overlay ── -->
+  <div x-show="emgActive" x-cloak
+       class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[100]"
+       role="alertdialog" aria-modal="true" aria-labelledby="emg-title" aria-describedby="emg-desc">
+    <div class="bg-surface-raised rounded-xl w-full max-w-sm mx-4 shadow-modal border-2 border-red-500">
+      <div class="flex flex-col items-center gap-4 px-6 py-8 text-center">
+        <!-- Icon -->
+        <div class="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0" aria-hidden="true">
+          <svg class="w-8 h-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>
+          </svg>
+        </div>
+        <!-- Text -->
+        <div>
+          <h2 id="emg-title" class="text-lg font-bold text-red-600">Emergency Stop Active</h2>
+          <p id="emg-desc" class="text-sm text-gray-600 mt-1.5">All motion has been halted.<br>Release the emergency button to resume.</p>
+        </div>
+        <!-- Pulsing indicator -->
+        <div class="flex items-center gap-2 px-4 py-2 rounded-full bg-red-50 border border-red-200">
+          <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" aria-hidden="true"></span>
+          <span class="text-xs font-medium text-red-700">Waiting for button release…</span>
         </div>
       </div>
     </div>

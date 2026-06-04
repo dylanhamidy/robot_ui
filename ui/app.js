@@ -76,6 +76,13 @@ function app() {
     handGuideLoading: false,
     captureType: "MoveJ",
 
+    // WeldStraight capture state: "stepIndex-a" or "stepIndex-b" while a capture is in flight
+    weldCapturing: null,
+    // MoveC capture state: "stepIndex-a", "stepIndex-b", or "stepIndex-c" while a capture is in flight
+    circleCapturing: null,
+
+    emgActive: false,
+
     ws: null,
 
     async init() {
@@ -178,6 +185,15 @@ function app() {
             this.handGuideEnabled = false;
             this.handGuideLoading = false;
             this.resetSetup();
+          } else if (l.includes("[EMERGENCY STOP]")) {
+            this.running = false;
+            this.activePlan = null;
+            this.ttEnabled = false;
+            this.emgActive = true;
+          } else if (l.includes("[EMG_CLEAR]")) {
+            this.emgActive = false;
+            this.pollTurntableStatus();
+            this.pollStatus();
           }
         }
         this.$nextTick(() => {
@@ -294,6 +310,36 @@ function app() {
           return {
             type: "Laser",
             duration: s.duration || 1.0,
+            enabled: s.enabled !== false,
+          };
+        }
+        if (s.type === "WeldStraight") {
+          return {
+            type: "WeldStraight",
+            pos_a: s.pos_a ? [...s.pos_a] : null,
+            pos_b: s.pos_b ? [...s.pos_b] : null,
+            displacement: s.displacement ? [...s.displacement] : null,
+            distance_mm: s.distance_mm ?? null,
+            vel: Array.isArray(s.vel) ? s.vel[0] : (s.vel ?? 10),
+            acc: Array.isArray(s.acc) ? s.acc[0] : (s.acc ?? 10),
+            time: s.time ?? 0,
+            with_laser: s.with_laser || false,
+            laser_delay: s.laser_delay ?? 0,
+            enabled: s.enabled !== false,
+          };
+        }
+        if (s.type === "MoveC") {
+          return {
+            type: "MoveC",
+            pos_start: s.pos_start ? [...s.pos_start] : null,
+            pos_via:   s.pos_via   ? [...s.pos_via]   : null,
+            pos_end:   s.pos_end   ? [...s.pos_end]   : null,
+            vel: Array.isArray(s.vel) ? s.vel[0] : (s.vel ?? 50),
+            acc: Array.isArray(s.acc) ? s.acc[0] : (s.acc ?? 100),
+            time: s.time ?? 0,
+            angle2: s.angle2 ?? 0,
+            with_laser: s.with_laser || false,
+            laser_delay: s.laser_delay ?? 0,
             enabled: s.enabled !== false,
           };
         }
@@ -490,6 +536,46 @@ function app() {
         delete step.acc;
         delete step.time;
         delete step.with_turntable;
+        delete step.pos_a; delete step.pos_b;
+        delete step.displacement; delete step.distance_mm;
+        delete step.pos_start; delete step.pos_via; delete step.pos_end;
+        delete step.angle2;
+      } else if (step.type === "WeldStraight") {
+        step.pos_a = null;
+        step.pos_b = null;
+        step.displacement = null;
+        step.distance_mm = null;
+        step.vel = 10;
+        step.acc = 10;
+        step.time = 0;
+        step.with_laser = step.with_laser || false;
+        delete step.pos;
+        delete step.with_turntable;
+        delete step.delay;
+        delete step.laser_delay;
+        delete step.direction;
+        delete step.speed_us;
+        delete step.duration;
+        delete step.pos_start; delete step.pos_via; delete step.pos_end;
+        delete step.angle2;
+      } else if (step.type === "MoveC") {
+        step.pos_start = null;
+        step.pos_via = null;
+        step.pos_end = null;
+        step.vel = 50;
+        step.acc = 100;
+        step.time = 0;
+        step.angle2 = 0;
+        step.with_laser = step.with_laser || false;
+        step.laser_delay = 0;
+        delete step.pos;
+        delete step.with_turntable;
+        delete step.delay;
+        delete step.direction;
+        delete step.speed_us;
+        delete step.duration;
+        delete step.pos_a; delete step.pos_b;
+        delete step.displacement; delete step.distance_mm;
       } else {
         step.pos = [0, 0, 0, 0, 0, 0];
         step.vel = 30;
@@ -499,6 +585,10 @@ function app() {
         delete step.direction;
         delete step.speed_us;
         delete step.duration;
+        delete step.pos_a; delete step.pos_b;
+        delete step.displacement; delete step.distance_mm;
+        delete step.pos_start; delete step.pos_via; delete step.pos_end;
+        delete step.angle2;
       }
       this.markDirty();
     },
@@ -573,6 +663,36 @@ function app() {
           return {
             type: "Laser",
             duration: Number(s.duration) || 1.0,
+            enabled: s.enabled !== false,
+          };
+        }
+        if (s.type === "WeldStraight") {
+          return {
+            type: "WeldStraight",
+            pos_a: s.pos_a,
+            pos_b: s.pos_b,
+            // displacement and distance_mm are (re-)computed by the server on save
+            vel: [Number(s.vel), Number(s.vel)],
+            acc: [Number(s.acc), Number(s.acc)],
+            time: Number(s.time) || 0,
+            with_laser: s.with_laser || false,
+            laser_delay: Number(s.laser_delay) || 0,
+            enabled: s.enabled !== false,
+          };
+        }
+        if (s.type === "MoveC") {
+          return {
+            type: "MoveC",
+            pos_start: s.pos_start,
+            pos_via:   s.pos_via,
+            pos_end:   s.pos_end,
+            vel: [Number(s.vel), Number(s.vel)],
+            acc: [Number(s.acc), Number(s.acc)],
+            time: Number(s.time) || 0,
+            angle1: 0.0,
+            angle2: Number(s.angle2) || 0,
+            with_laser: s.with_laser || false,
+            laser_delay: Number(s.laser_delay) || 0,
             enabled: s.enabled !== false,
           };
         }
@@ -814,6 +934,85 @@ function app() {
       this.handGuideLoading = false;
     },
 
+    async captureWeldPoint(stepIdx, which) {
+      const key = `${stepIdx}-${which}`;
+      this.weldCapturing = key;
+      try {
+        const r = await fetch("/api/robot/capture_pose", { method: "POST" });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          this.termLines.push({ text: `[ERROR] Capture failed: ${err.detail || r.status}`, type: "sentinel-error" });
+          return;
+        }
+        const { pos } = await r.json();
+        const step = this.modalSteps[stepIdx];
+        if (!step) return;
+        if (which === "a") {
+          step.pos_a = pos;
+        } else {
+          step.pos_b = pos;
+        }
+        // Client-side preview of the projected distance
+        if (step.pos_a && step.pos_b) {
+          const { distance } = this._computeWeldDisplacement(step.pos_a, step.pos_b);
+          step.distance_mm = distance;
+        }
+        this.markDirty();
+      } finally {
+        this.weldCapturing = null;
+      }
+    },
+
+    async captureCirclePoint(stepIdx, which) {
+      const key = `${stepIdx}-${which}`;
+      this.circleCapturing = key;
+      try {
+        const r = await fetch("/api/robot/capture_pose", { method: "POST" });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          this.termLines.push({ text: `[ERROR] Capture failed: ${err.detail || r.status}`, type: "sentinel-error" });
+          return;
+        }
+        const { pos } = await r.json();
+        const step = this.modalSteps[stepIdx];
+        if (!step) return;
+        if (which === "a") step.pos_start = pos;
+        else if (which === "b") step.pos_via = pos;
+        else step.pos_end = pos;
+        this.markDirty();
+      } finally {
+        this.circleCapturing = null;
+      }
+    },
+
+    _computeWeldDisplacement(posA, posB) {
+      // Mirrors server-side _compute_weld_displacement() for live preview.
+      // ZYZ rotation matrix: R = Rz(A) @ Ry(B) @ Rz(C) — Doosan TCP convention
+      const [xA, yA, zA, AD, BD, CD] = posA;
+      const [xB, yB, zB] = posB;
+      const toRad = (d) => d * Math.PI / 180;
+      const cA = Math.cos(toRad(AD)), sA = Math.sin(toRad(AD));
+      const cB = Math.cos(toRad(BD)), sB = Math.sin(toRad(BD));
+      const cC = Math.cos(toRad(CD)), sC = Math.sin(toRad(CD));
+      // R columns (R[row][col])
+      const R = [
+        [cA*cB*cC - sA*sC,  -cA*cB*sC - sA*cC,  cA*sB],
+        [sA*cB*cC + cA*sC,  -sA*cB*sC + cA*cC,  sA*sB],
+        [-sB*cC,             sB*sC,              cB   ],
+      ];
+      const vx = xB - xA, vy = yB - yA, vz = zB - zA;
+      // v_tool = R^T @ v_base
+      const dxT = R[0][0]*vx + R[1][0]*vy + R[2][0]*vz;
+      const dyT = R[0][1]*vx + R[1][1]*vy + R[2][1]*vz;
+      const distance = parseFloat(Math.sqrt(dxT*dxT + dyT*dyT).toFixed(3));
+      const displacement = [
+        parseFloat(dxT.toFixed(4)),
+        parseFloat(dyT.toFixed(4)),
+        0.0, 0.0, 0.0, 0.0,
+      ];
+      return { displacement, distance };
+    },
+
     // ── Turntable ─────────────────────────────────────────────────────────────
 
     async pollTurntableStatus() {
@@ -825,6 +1024,7 @@ function app() {
         this.ttDirection = s.direction;
         this.ttSpeedPct = this._pctFromDelay(s.speed);
         this.ttRejectedPorts = s.rejected_ports || [];
+        if (s.emg_state === 1) this.emgActive = false;
         if (s.pending_port && !this.showTtDetectModal) {
           this.ttPendingPort = s.pending_port;
           this.ttSudoPass = "";
